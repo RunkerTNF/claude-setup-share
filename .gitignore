@@ -1,0 +1,12 @@
+# Claude Code local state — этого в публичной репе быть не должно
+.claude/sessions/
+.claude/settings.local.json
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# Editor
+.idea/
+.vscode/
+*.swp

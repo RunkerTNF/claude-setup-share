@@ -1,0 +1,30 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(stat:*)",
+      "Bash(date:*)",
+      "Bash(ls:*)",
+      "Bash(test:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(stat *)",
+      "Bash(date *)",
+      "Bash(ls *)",
+      "Bash(test *)",
+      "Bash(git status *)",
+      "Bash(git diff *)",
+      "Bash(git log *)"
+    ]
+  },
+  "statusLine": {
+    "type": "command",
+    "command": "node /c/Users/<USER>/.claude/statusline.js"
+  },
+  "enabledPlugins": {
+    "context7@claude-plugins-official": true,
+    "superpowers@claude-plugins-official": true
+  },
+  "effortLevel": "xhigh",
+  "autoMemoryDirectory": "~/.claude/memory"
+}
