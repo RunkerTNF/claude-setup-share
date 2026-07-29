@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+import runpy
 import shutil
 import subprocess
 import sys
@@ -34,6 +35,19 @@ def _run(command: list[str], *, cwd: Path, environment: dict[str, str]) -> subpr
 
 def _venv_python(environment_root: Path) -> Path:
     return environment_root / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+
+
+def test_installed_smoke_canonicalizes_temporary_root(tmp_path: Path) -> None:
+    actual_root = tmp_path / "actual"
+    (actual_root / "nested").mkdir(parents=True)
+    lexical_alias = actual_root / "nested" / ".."
+    smoke = runpy.run_path(
+        str(Path(__file__).resolve().parents[1] / "installed_cli_smoke.py")
+    )
+
+    canonicalize = smoke["_canonical_temporary_root"]
+
+    assert canonicalize(str(lexical_alias)) == actual_root.resolve()
 
 
 def test_non_editable_wheel_contains_resources_and_runs_full_cli_smoke(tmp_path: Path) -> None:

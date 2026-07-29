@@ -19,6 +19,10 @@ def _console_command() -> list[str]:
     return [str(command)]
 
 
+def _canonical_temporary_root(temporary: str) -> Path:
+    return Path(temporary).resolve(strict=True)
+
+
 def _run(command: list[str], *arguments: str) -> subprocess.CompletedProcess[str]:
     environment = os.environ.copy()
     environment.pop("PYTHONPATH", None)
@@ -41,7 +45,7 @@ def _run(command: list[str], *arguments: str) -> subprocess.CompletedProcess[str
 def main() -> int:
     command = _console_command()
     with TemporaryDirectory(prefix="agent-workflow-wheel-smoke-") as temporary:
-        root = Path(temporary)
+        root = _canonical_temporary_root(temporary)
         home = root / "home"
         cwd = root / "cwd"
         plan = root / "plan.json"
