@@ -92,16 +92,35 @@ def test_portable_skill_accepts_bare_packaged_reference(tmp_path: Path) -> None:
     assert lint_skill(skill) == ()
 
 
-def test_neutral_home_runtime_path_is_not_a_packaged_reference(
+@pytest.mark.parametrize(
+    "runtime_path",
+    (
+        "~/.agents/workflow/agent-workflow.pyz",
+        ".agents/sessions/_backlog.md",
+    ),
+)
+def test_neutral_runtime_path_is_not_a_packaged_reference(
     tmp_path: Path,
+    runtime_path: str,
 ) -> None:
     skill = tmp_path / "review"
     write_skill(
         skill,
-        "Run `~/.agents/workflow/agent-workflow.pyz` with Python.",
+        f"Use `{runtime_path}` at runtime.",
     )
 
     assert lint_skill(skill) == ()
+
+
+def test_neutral_runtime_path_cannot_hide_traversal(
+    tmp_path: Path,
+) -> None:
+    skill = tmp_path / "review"
+    write_skill(skill, "Use `.agents/../private.md` at runtime.")
+
+    assert [item.code for item in lint_skill(skill)] == [
+        "portable.reference-unsafe"
+    ]
 
 
 def test_lint_reports_missing_bare_packaged_reference(tmp_path: Path) -> None:

@@ -6,7 +6,8 @@ description: Use when installing, configuring, or reconfiguring the portable mul
 # Agent Workflow Setup
 
 Read [the setup flow](references/setup-flow.md) completely before planning
-filesystem changes.
+filesystem changes. For project setup or read-only project inference, also
+read [project inference](references/project-inference.md).
 
 Resolve the persistent manager in this order:
 

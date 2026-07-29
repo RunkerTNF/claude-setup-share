@@ -214,6 +214,7 @@ def _references(text: str) -> tuple[str, ...]:
             candidate
             and not _is_external(candidate)
             and not _is_vendor_path(candidate)
+            and not _is_neutral_runtime_path(candidate)
             and not _follows_vendor_environment_token(text, match.start())
             and not _follows_neutral_home_token(
                 text,
@@ -258,6 +259,15 @@ def _inside_markdown_target(
 
 def _is_vendor_path(reference: str) -> bool:
     return re.match(r"^\.(?:claude|codex)(?:[\\/]|$)", reference, re.IGNORECASE) is not None
+
+
+def _is_neutral_runtime_path(reference: str) -> bool:
+    try:
+        normalized = normalize_relative_path(reference)
+    except ValueError:
+        return False
+    parts = normalized.split("/")
+    return len(parts) > 1 and parts[0].casefold() == ".agents"
 
 
 def _follows_vendor_environment_token(text: str, start: int) -> bool:

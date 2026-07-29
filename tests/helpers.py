@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
 
 from agent_workflow.doctor import run_doctor
 from agent_workflow.model import ProjectProfile, Scope
+from agent_workflow.portability import parse_portable_skill_frontmatter
 from agent_workflow.setup import SetupRequest, build_setup_plan
 from agent_workflow.transactions import apply_plan
 
@@ -19,6 +22,47 @@ _EPHEMERAL_PARTS = (
     (".agents", "workflow", "locks"),
     (".git",),
 )
+_BACKLOG_TAG = re.compile(
+    r"\[(?:backlog(?::[a-z-]+)?|no-backlog)\]"
+)
+
+
+@dataclass(frozen=True)
+class LoadedSkill:
+    name: str
+    description: str
+    body: str
+    emitted_tags: frozenset[str]
+    accepted_tags: frozenset[str]
+
+
+def load_skill(repo_root: Path, name: str) -> LoadedSkill:
+    source = (
+        repo_root / "skills" / name / "SKILL.md"
+    ).read_text(encoding="utf-8")
+    parsed_name, description, body = parse_portable_skill_frontmatter(
+        source
+    )
+    return LoadedSkill(
+        name=parsed_name,
+        description=description,
+        body=body,
+        emitted_tags=_section_tags(body, "Emitted backlog tags"),
+        accepted_tags=_section_tags(body, "Accepted backlog tags"),
+    )
+
+
+def _section_tags(body: str, heading: str) -> frozenset[str]:
+    match = re.search(
+        rf"(?ms)^## {re.escape(heading)}\s*$"
+        r"(?P<section>.*?)(?=^## |\Z)",
+        body,
+    )
+    if match is None:
+        return frozenset()
+    return frozenset(
+        _BACKLOG_TAG.findall(match.group("section"))
+    )
 
 
 def materialize_bootstrap_repo(destination: Path) -> Path:
