@@ -406,3 +406,39 @@ def test_lock_replacement_between_identity_and_token_check_survives(tmp_path: Pa
     monkeypatch.setattr(type(path), "read_text", replace_then_read)
     lock.__exit__(None, None, None)
     assert path.read_text(encoding="utf-8") == "replacement"
+
+
+def test_automatic_restore_parent_symlink_attack_is_recoverable(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    root, outside = tmp_path / ".agents", tmp_path / "outside"
+    nested = root / "nested"; nested.mkdir(parents=True); outside.mkdir()
+    first, second = nested / "first.txt", root / "second.txt"
+    first.write_bytes(b"first before"); second.write_bytes(b"second before")
+    plan = TransactionPlan.new(scope_root=str(root), target_roots={"neutral": str(root), "scope": str(tmp_path)}, allowed_roots=(str(tmp_path),), operations=(
+        WriteOperation.from_bytes("neutral", "nested/first.txt", b"first after", sha256_file(first), Ownership.CANONICAL),
+        WriteOperation.from_bytes("neutral", "second.txt", b"second after", sha256_file(second), Ownership.CANONICAL),
+    ))
+    from agent_workflow.transactions import engine
+    real_replace, real_stage = os.replace, engine._create_stage_root
+    def fail_second(source: Path | str, destination: Path | str) -> None:
+        if Path(destination) == second: raise OSError("original commit failure")
+        real_replace(source, destination)
+    def stage_then_attack(parent: Path, transaction_id: str, label: str) -> Path:
+        result = real_stage(parent, transaction_id, label)
+        if label.startswith("restore-"):
+            shutil.rmtree(nested)
+            try: nested.symlink_to(outside, target_is_directory=True)
+            except OSError: pytest.skip("symlink creation unavailable")
+        return result
+    monkeypatch.setattr(engine.os, "replace", fail_second)
+    monkeypatch.setattr(engine, "_create_stage_root", stage_then_attack)
+    with pytest.raises(OSError, match="original commit failure") as error:
+        apply_plan(plan)
+    assert any("rollback cleanup failed" in note for note in error.value.__notes__)
+    assert not (outside / "first.txt").exists()
+    journals = list((root / "workflow" / "journals").glob("*.json")); assert len(journals) == 1
+    payload = json.loads(journals[0].read_text()); assert payload["status"] == "rollback_failed"
+    assert (root / "workflow" / "backups" / payload["transaction_id"]).is_dir()
+    nested.unlink(); nested.mkdir(); first.write_bytes(b"first after"); second.write_bytes(b"second after")
+    monkeypatch.setattr(engine.os, "replace", real_replace); monkeypatch.setattr(engine, "_create_stage_root", real_stage)
+    rollback_transaction(journals[0])
+    assert first.read_bytes() == b"first before" and second.read_bytes() == b"second before"
