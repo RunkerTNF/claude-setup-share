@@ -25,8 +25,7 @@ class ScopeLock:
         try:
             lock_file = self.path.open("x+", encoding="utf-8")
             self._handle = lock_file
-            opened_stat = self.path.lstat()
-            self._identity = (opened_stat.st_dev, opened_stat.st_ino)
+            self._identity = self._capture_identity(lock_file)
             self._write_token(lock_file)
             self._flush_token(lock_file)
             os.fsync(lock_file.fileno())
@@ -49,6 +48,11 @@ class ScopeLock:
 
     def _flush_token(self, lock_file: TextIO) -> None:
         lock_file.flush()
+
+    @staticmethod
+    def _capture_identity(lock_file: TextIO) -> tuple[int, int]:
+        opened_stat = os.fstat(lock_file.fileno())
+        return opened_stat.st_dev, opened_stat.st_ino
 
     def _cleanup_partial_acquisition(self, original_error: Exception) -> None:
         try:

@@ -483,10 +483,76 @@ def test_partial_lock_acquisition_cleans_owned_lock_and_can_retry(tmp_path: Path
         monkeypatch.setattr(lock_module.os, failure_point, lambda *_args: (_ for _ in ()).throw(OSError(f"{failure_point} failed")))
     with pytest.raises(OSError, match=failure_point):
         ScopeLock(path).__enter__()
-    assert not path.exists()
+    if failure_point == "fstat":
+        assert path.exists()
+        path.unlink()
+    else:
+        assert not path.exists()
     if failure_point in {"write", "flush"}:
         monkeypatch.setattr(ScopeLock, method, original)
     else:
         monkeypatch.setattr(lock_module.os, failure_point, original)
     with ScopeLock(path):
         assert path.exists()
+
+
+def test_lock_replacement_before_identity_capture_survives_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    path = tmp_path / ".workflow.lock"
+    def replace_then_fail(_self: ScopeLock, handle: object) -> tuple[int, int]:
+        handle.close(); path.unlink(); path.write_bytes(b"replacement")
+        raise OSError("identity capture failed")
+    monkeypatch.setattr(ScopeLock, "_capture_identity", replace_then_fail)
+    with pytest.raises(OSError, match="identity capture failed"):
+        ScopeLock(path).__enter__()
+    assert path.read_bytes() == b"replacement"
+
+
+@pytest.mark.parametrize("racing_member", ("staging", "journal"))
+def test_namespace_race_preserves_evidence_and_leaves_no_owned_debris(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, racing_member: str) -> None:
+    root = tmp_path / ".agents"; root.mkdir(); target = root / "RULES.md"
+    transaction_id = "22222222-2222-2222-2222-222222222222"
+    from agent_workflow.transactions import engine
+    monkeypatch.setattr(engine, "uuid4", lambda: UUID(transaction_id))
+    original_claim = engine._claim_transaction_namespace
+    def claim_then_race(*args: object, **kwargs: object) -> object:
+        result = original_claim(*args, **kwargs)
+        workflow = root / "workflow"
+        if racing_member == "staging":
+            race = workflow / "staging" / transaction_id / "racer"; race.mkdir(parents=True); (race / "evidence").write_bytes(b"racer")
+        else:
+            race = workflow / "journals" / f"{transaction_id}.json"; race.write_bytes(b"racer evidence")
+        return result
+    monkeypatch.setattr(engine, "_claim_transaction_namespace", claim_then_race)
+    with pytest.raises(BackupError):
+        apply_plan(make_plan(root, None))
+    assert not target.exists()
+    assert not (root / "workflow" / "backups" / transaction_id).exists()
+    evidence = (root / "workflow" / "staging" / transaction_id / "racer" / "evidence") if racing_member == "staging" else (root / "workflow" / "journals" / f"{transaction_id}.json")
+    assert b"racer" in evidence.read_bytes()
+
+
+def test_initial_journal_publication_failure_cleans_owned_artifacts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    root = tmp_path / ".agents"; root.mkdir(); target = root / "RULES.md"
+    from agent_workflow.transactions import engine
+    monkeypatch.setattr(engine, "_sync_initial_journal", lambda _output: (_ for _ in ()).throw(OSError("exclusive publication unavailable")))
+    with pytest.raises(OSError, match="publication unavailable"):
+        apply_plan(make_plan(root, None))
+    assert not target.exists()
+    assert not list((root / "workflow" / "backups").iterdir())
+    assert not list((root / "workflow" / "staging").iterdir())
+    assert not list((root / "workflow" / "journals").iterdir())
+
+
+def test_unpublished_cleanup_preserves_foreign_backup_content(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    root = tmp_path / ".agents"; root.mkdir()
+    from agent_workflow.transactions import engine
+    def add_foreign_then_fail(_output: object) -> None:
+        backup_root = next((root / "workflow" / "backups").iterdir())
+        (backup_root / "foreign").write_bytes(b"foreign")
+        raise OSError("publication failed")
+    monkeypatch.setattr(engine, "_sync_initial_journal", add_foreign_then_fail)
+    with pytest.raises(OSError, match="publication failed"):
+        apply_plan(make_plan(root, None))
+    backup_root = next((root / "workflow" / "backups").iterdir())
+    assert (backup_root / "foreign").read_bytes() == b"foreign"
+    assert not (backup_root / "inventory.json").exists()

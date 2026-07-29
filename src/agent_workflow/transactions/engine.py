@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 import os
 from pathlib import Path
+import shutil
 from typing import Iterable, Mapping, Sequence
 from uuid import uuid4
 
@@ -28,6 +29,14 @@ class _ResolvedOperation:
     before_sha256: str | None
 
 
+@dataclass(frozen=True)
+class _NamespaceClaim:
+    staging_root: Path
+    owner_path: Path
+    journal_path: Path
+    token: str
+
+
 def apply_plan(plan: TransactionPlan) -> TransactionJournal:
     """Apply one fully validated plan or restore its complete scope on failure."""
     plan.validate()
@@ -46,7 +55,12 @@ def apply_plan(plan: TransactionPlan) -> TransactionJournal:
         journal_parent = _ensure_internal_directory(workflow_root / "journals")
         backup_root = backup_parent / transaction_id
         journal_path = journal_parent / f"{transaction_id}.json"
-        _claim_transaction_namespace(backup_root, staging_parent / transaction_id, journal_path)
+        claim = _claim_transaction_namespace(backup_root, staging_parent / transaction_id, journal_path)
+        try:
+            _verify_namespace_claim(claim)
+        except Exception:
+            _release_namespace_claim(claim)
+            raise
         sources = tuple(
             backup.BackupSource(item.operation.root_id, item.operation.path, item.target, item.existed, item.before_sha256)
             for item in resolved_operations
@@ -80,7 +94,11 @@ def apply_plan(plan: TransactionPlan) -> TransactionJournal:
             journal_path=str(journal_path),
             warnings=warnings,
         )
-        _write_journal(journal, exclusive=True)
+        try:
+            _publish_initial_journal(journal, claim)
+        except Exception:
+            _cleanup_unpublished_transaction(claim, backup_root, sources)
+            raise
         backup.verify_backup(backup_root, sources)
         _revalidate_complete_plan(plan, resolved_operations)
         committing_started = False
@@ -307,10 +325,98 @@ def _create_stage_root(parent: Path, transaction_id: str, label: str) -> Path:
     return root
 
 
-def _claim_transaction_namespace(backup_root: Path, staging_root: Path, journal_path: Path) -> None:
+def _claim_transaction_namespace(backup_root: Path, staging_root: Path, journal_path: Path) -> _NamespaceClaim:
     existing = [path for path in (backup_root, staging_root, journal_path) if path.exists() or path.is_symlink()]
     if existing:
         raise BackupError(f"transaction namespace already exists: {existing[0]}")
+    token = str(uuid4())
+    try:
+        staging_root.mkdir()
+        owner_path = staging_root / ".owner"
+        _write_fsynced(owner_path, token.encode("ascii"))
+    except Exception:
+        claim = _NamespaceClaim(staging_root, staging_root / ".owner", journal_path, token)
+        _release_namespace_claim(claim)
+        raise
+    return _NamespaceClaim(staging_root, owner_path, journal_path, token)
+
+
+def _verify_namespace_claim(claim: _NamespaceClaim, *, allow_apply: bool = False) -> None:
+    if claim.owner_path.read_text(encoding="ascii") != claim.token:
+        raise BackupError("transaction namespace ownership changed")
+    if claim.journal_path.exists() or claim.journal_path.is_symlink():
+        raise BackupError("transaction namespace journal was claimed by another writer")
+    allowed = {claim.owner_path}
+    if allow_apply:
+        allowed.add(claim.staging_root / "apply")
+    if set(claim.staging_root.iterdir()) != allowed:
+        raise BackupError("transaction namespace contains racing artifacts")
+
+
+def _release_namespace_claim(claim: _NamespaceClaim) -> None:
+    try:
+        if claim.owner_path.read_text(encoding="ascii") == claim.token:
+            claim.owner_path.unlink()
+    except (OSError, UnicodeError):
+        pass
+    try:
+        claim.staging_root.rmdir()
+    except OSError:
+        pass
+
+
+def _publish_initial_journal(journal: TransactionJournal, claim: _NamespaceClaim) -> None:
+    _verify_namespace_claim(claim, allow_apply=True)
+    output = None
+    identity: tuple[int, int] | None = None
+    try:
+        output = claim.journal_path.open("xb")
+        stat = os.fstat(output.fileno())
+        identity = stat.st_dev, stat.st_ino
+        output.write(journal.to_json().encode("utf-8"))
+        _sync_initial_journal(output)
+        output.close()
+        output = None
+        claim.owner_path.unlink(missing_ok=True)
+    except FileExistsError as error:
+        raise BackupError(f"transaction namespace already exists: {claim.journal_path}") from error
+    except Exception:
+        if output is not None:
+            output.close()
+        try:
+            stat = claim.journal_path.lstat()
+            if identity == (stat.st_dev, stat.st_ino):
+                claim.journal_path.unlink()
+        except OSError:
+            pass
+        raise
+
+
+def _sync_initial_journal(output: object) -> None:
+    output.flush()
+    os.fsync(output.fileno())
+
+
+def _cleanup_unpublished_transaction(claim: _NamespaceClaim, backup_root: Path, sources: tuple[backup.BackupSource, ...]) -> None:
+    try:
+        _verify_namespace_claim(claim, allow_apply=True)
+        inventory = backup.verify_backup(backup_root, sources)
+        allowed_files = {backup_root / "inventory.json"}
+        allowed_files.update(backup_root / entry.backup_path for entry in inventory if entry.backup_path is not None)
+        foreign_files = [path for path in backup_root.rglob("*") if path.is_file() and path not in allowed_files]
+    except Exception:
+        return
+    if foreign_files:
+        for path in allowed_files:
+            path.unlink(missing_ok=True)
+        for directory in sorted((path for path in backup_root.rglob("*") if path.is_dir()), key=lambda path: len(path.parts), reverse=True):
+            try:
+                directory.rmdir()
+            except OSError:
+                pass
+    else:
+        shutil.rmtree(backup_root)
+    shutil.rmtree(claim.staging_root)
 
 
 def _stage_writes(stage_root: Path, operations: Iterable[_ResolvedOperation]) -> dict[tuple[str, str], Path]:
@@ -426,20 +532,10 @@ def _cleanup_empty_parents(start: Path, boundary: Path) -> None:
         current = current.parent
 
 
-def _write_journal(journal: TransactionJournal, *, exclusive: bool = False) -> None:
+def _write_journal(journal: TransactionJournal) -> None:
     path = Path(journal.journal_path)
     if path.is_symlink():
         raise UnsafePathError(f"journal path is a symlink: {path}")
-    if exclusive:
-        temporary = path.with_name(f".{path.name}.{uuid4()}.tmp")
-        try:
-            _write_fsynced(temporary, journal.to_json().encode("utf-8"))
-            os.link(temporary, path)
-        except FileExistsError as error:
-            raise BackupError(f"transaction namespace already exists: {path}") from error
-        finally:
-            temporary.unlink(missing_ok=True)
-        return
     temporary = path.with_name(f".{path.name}.{uuid4()}.tmp")
     _write_fsynced(temporary, journal.to_json().encode("utf-8"))
     os.replace(temporary, path)
