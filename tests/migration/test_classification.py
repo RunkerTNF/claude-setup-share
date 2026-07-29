@@ -88,6 +88,29 @@ def test_request_contains_only_redacted_ambiguous_text(
     assert tmp_path.as_posix() not in serialized
 
 
+def test_request_redacts_absolute_paths_without_redacting_urls(
+    tmp_path: Path,
+) -> None:
+    rules = _record(
+        tmp_path,
+        "rules.md",
+        ArtifactKind.RULES,
+        "Read /private/project/rules.md and https://example.com/docs.\n",
+    )
+    inventory = MigrationInventory(
+        schema_version=1,
+        roots=("claude:global:.claude",),
+        artifacts=(rules,),
+        warnings=(),
+    )
+
+    serialized = build_classification_request(inventory).to_json()
+
+    assert "/private/project/rules.md" not in serialized
+    assert "<absolute-path>" in serialized
+    assert "https://example.com/docs" in serialized
+
+
 def test_response_requires_exact_coverage_and_request_hash(
     tmp_path: Path,
 ) -> None:

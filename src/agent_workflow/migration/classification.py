@@ -8,9 +8,15 @@ from pathlib import Path
 import re
 from typing import Iterable
 
-from agent_workflow.model import validate_sha256
+from agent_workflow.model import normalize_relative_path, validate_sha256
 
-from .model import ArtifactKind, MigrationInventory
+from .model import (
+    ArtifactKind,
+    ArtifactRecord,
+    ArtifactScope,
+    MigrationInventory,
+    Sensitivity,
+)
 from .redaction import redact_artifact, redact_text
 
 
@@ -50,6 +56,40 @@ _DECISION_KEYS = frozenset(
     }
 )
 _CONFIDENCE = frozenset({"high", "medium", "low"})
+_INVENTORY_KEYS = frozenset(
+    {"schema_version", "roots", "artifacts", "warnings"}
+)
+_INVENTORY_ARTIFACT_KEYS = frozenset(
+    {
+        "artifact_id",
+        "agent_id",
+        "kind",
+        "scope",
+        "relative_path",
+        "sha256",
+        "media_type",
+        "size_bytes",
+        "sensitivity",
+        "already_neutral",
+    }
+)
+_CLASSIFICATION_ARTIFACT_KEYS = frozenset(
+    {
+        "artifact_id",
+        "original_kind",
+        "scope",
+        "media_type",
+        "relative_label",
+        "text",
+        "sensitivity",
+        "redaction_reasons",
+        "truncated",
+    }
+)
+_ABSOLUTE_PATH = re.compile(
+    r"(?<![\w:/])(?:[A-Za-z]:[\\/][^\s`\"']+|"
+    r"/(?!/)[^\s`\"']+)"
+)
 
 
 class DecisionKind(StrEnum):
@@ -75,6 +115,53 @@ class ClassificationArtifact:
     sensitivity: str
     redaction_reasons: tuple[str, ...]
     truncated: bool
+
+    def __post_init__(self) -> None:
+        validate_sha256(
+            self.artifact_id,
+            field="classification artifact ID",
+        )
+        if not isinstance(self.original_kind, ArtifactKind):
+            raise ValueError("classification original kind is invalid")
+        if self.original_kind not in _AMBIGUOUS_KINDS:
+            raise ValueError("classification artifact is not ambiguous")
+        try:
+            ArtifactScope(self.scope)
+        except ValueError as error:
+            raise ValueError(
+                "classification artifact scope is invalid"
+            ) from error
+        if not isinstance(self.media_type, str) or not self.media_type:
+            raise ValueError(
+                "classification artifact media type is invalid"
+            )
+        relative_label = normalize_relative_path(self.relative_label)
+        if not isinstance(self.text, str) or "\x00" in self.text:
+            raise ValueError("classification artifact text is invalid")
+        if self.sensitivity not in {
+            Sensitivity.SAFE.value,
+            Sensitivity.REDACTED.value,
+        }:
+            raise ValueError(
+                "classification artifact sensitivity is invalid"
+            )
+        if (
+            not isinstance(self.redaction_reasons, tuple)
+            or self.redaction_reasons
+            != tuple(sorted(set(self.redaction_reasons)))
+            or any(
+                not isinstance(reason, str) or not reason
+                for reason in self.redaction_reasons
+            )
+        ):
+            raise ValueError(
+                "classification redaction reasons are invalid"
+            )
+        if type(self.truncated) is not bool:
+            raise ValueError(
+                "classification artifact truncated flag is invalid"
+            )
+        object.__setattr__(self, "relative_label", relative_label)
 
     def payload(self) -> dict[str, object]:
         return {
@@ -121,6 +208,19 @@ class ClassificationRequest:
         artifact_ids = [item.artifact_id for item in self.artifacts]
         if len(set(artifact_ids)) != len(artifact_ids):
             raise ValueError("classification request has duplicate artifacts")
+        expected_digest = _classification_request_digest(
+            self.known_adapter_ids,
+            self.allowed_decision_kinds,
+            self.artifacts,
+        )
+        if self.request_sha256 != expected_digest:
+            raise ValueError(
+                "classification request SHA-256 does not match contents"
+            )
+        if self.request_id != f"migration-{expected_digest[:24]}":
+            raise ValueError(
+                "classification request ID does not match contents"
+            )
 
     def to_json(self) -> str:
         payload = {
@@ -140,6 +240,59 @@ class ClassificationRequest:
     @property
     def artifact_ids(self) -> frozenset[str]:
         return frozenset(item.artifact_id for item in self.artifacts)
+
+    @classmethod
+    def from_json(cls, raw: str) -> "ClassificationRequest":
+        try:
+            payload = json.loads(raw)
+        except json.JSONDecodeError as error:
+            raise ValueError(
+                "classification request is not valid JSON"
+            ) from error
+        _require_object_keys(
+            payload,
+            _REQUEST_KEYS,
+            "classification request",
+        )
+        known_adapter_ids = _string_tuple(
+            payload["known_adapter_ids"],
+            "known_adapter_ids",
+        )
+        allowed_raw = _string_tuple(
+            payload["allowed_decision_kinds"],
+            "allowed_decision_kinds",
+        )
+        try:
+            allowed = tuple(DecisionKind(item) for item in allowed_raw)
+        except ValueError as error:
+            raise ValueError(
+                "classification request has an invalid decision kind"
+            ) from error
+        raw_artifacts = payload["artifacts"]
+        if not isinstance(raw_artifacts, list):
+            raise ValueError(
+                "classification request artifacts must be a list"
+            )
+        artifacts = tuple(
+            _classification_artifact_from_payload(item)
+            for item in raw_artifacts
+        )
+        if type(payload["schema_version"]) is not int:
+            raise ValueError(
+                "classification request schema version is invalid"
+            )
+        if not isinstance(payload["request_id"], str):
+            raise ValueError("classification request ID is invalid")
+        if not isinstance(payload["request_sha256"], str):
+            raise ValueError("classification request SHA-256 is invalid")
+        return cls(
+            schema_version=payload["schema_version"],
+            request_id=payload["request_id"],
+            request_sha256=payload["request_sha256"],
+            known_adapter_ids=known_adapter_ids,
+            allowed_decision_kinds=allowed,
+            artifacts=artifacts,
+        )
 
 
 @dataclass(frozen=True)
@@ -209,6 +362,10 @@ def build_classification_request(
         redacted = redact_artifact(record)
         if redacted.text is None:
             continue
+        safe_text, path_redacted = _redact_absolute_paths(redacted.text)
+        reasons = set(redacted.reasons)
+        if path_redacted:
+            reasons.add("absolute-path")
         artifacts.append(
             ClassificationArtifact(
                 artifact_id=record.artifact_id,
@@ -216,9 +373,13 @@ def build_classification_request(
                 scope=record.scope.value,
                 media_type=record.media_type,
                 relative_label=redacted.relative_label,
-                text=redacted.text,
-                sensitivity=redacted.sensitivity.value,
-                redaction_reasons=redacted.reasons,
+                text=safe_text,
+                sensitivity=(
+                    Sensitivity.REDACTED.value
+                    if reasons
+                    else redacted.sensitivity.value
+                ),
+                redaction_reasons=tuple(sorted(reasons)),
                 truncated=redacted.truncated,
             )
         )
@@ -227,19 +388,11 @@ def build_classification_request(
         sorted({item.agent_id for item in inventory.artifacts})
     )
     allowed = tuple(sorted(DecisionKind, key=lambda item: item.value))
-    digest_payload = {
-        "schema_version": 1,
-        "known_adapter_ids": list(known_adapter_ids),
-        "allowed_decision_kinds": [item.value for item in allowed],
-        "artifacts": [item.payload() for item in artifacts],
-    }
-    canonical = json.dumps(
-        digest_payload,
-        ensure_ascii=False,
-        separators=(",", ":"),
-        sort_keys=True,
-    ).encode("utf-8")
-    digest = hashlib.sha256(canonical).hexdigest()
+    digest = _classification_request_digest(
+        known_adapter_ids,
+        allowed,
+        tuple(artifacts),
+    )
     return ClassificationRequest(
         schema_version=1,
         request_id=f"migration-{digest[:24]}",
@@ -403,3 +556,228 @@ def load_classification_response(
             sorted(decisions, key=lambda item: item.artifact_id)
         ),
     )
+
+
+def load_classification_request(path: Path) -> ClassificationRequest:
+    try:
+        raw = Path(path).read_text(encoding="utf-8")
+    except (OSError, UnicodeError) as error:
+        raise ValueError("classification request is unreadable") from error
+    return ClassificationRequest.from_json(raw)
+
+
+def load_migration_inventory(
+    path: Path,
+    *,
+    home: Path,
+    project_root: Path | None,
+) -> MigrationInventory:
+    try:
+        payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise ValueError("migration inventory is unreadable") from error
+    _require_object_keys(payload, _INVENTORY_KEYS, "migration inventory")
+    if type(payload["schema_version"]) is not int:
+        raise ValueError("migration inventory schema version is invalid")
+    roots = _string_tuple(payload["roots"], "inventory roots")
+    for root in roots:
+        _validate_inventory_root(root)
+    warnings = _string_tuple(payload["warnings"], "inventory warnings")
+    raw_artifacts = payload["artifacts"]
+    if not isinstance(raw_artifacts, list):
+        raise ValueError("migration inventory artifacts must be a list")
+    resolved_home = _safe_boundary(home, "home")
+    resolved_project = (
+        _safe_boundary(project_root, "project root")
+        if project_root is not None
+        else None
+    )
+    artifacts = tuple(
+        _inventory_artifact_from_payload(
+            item,
+            home=resolved_home,
+            project_root=resolved_project,
+        )
+        for item in raw_artifacts
+    )
+    return MigrationInventory(
+        schema_version=payload["schema_version"],
+        roots=roots,
+        artifacts=artifacts,
+        warnings=warnings,
+    )
+
+
+def _classification_request_digest(
+    known_adapter_ids: tuple[str, ...],
+    allowed_decision_kinds: tuple[DecisionKind, ...],
+    artifacts: tuple[ClassificationArtifact, ...],
+) -> str:
+    digest_payload = {
+        "schema_version": 1,
+        "known_adapter_ids": list(known_adapter_ids),
+        "allowed_decision_kinds": [
+            item.value for item in allowed_decision_kinds
+        ],
+        "artifacts": [item.payload() for item in artifacts],
+    }
+    canonical = json.dumps(
+        digest_payload,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
+
+
+def _classification_artifact_from_payload(
+    payload: object,
+) -> ClassificationArtifact:
+    _require_object_keys(
+        payload,
+        _CLASSIFICATION_ARTIFACT_KEYS,
+        "classification artifact",
+    )
+    reasons = _string_tuple(
+        payload["redaction_reasons"],
+        "redaction_reasons",
+    )
+    try:
+        original_kind = ArtifactKind(payload["original_kind"])
+    except (TypeError, ValueError) as error:
+        raise ValueError(
+            "classification original kind is invalid"
+        ) from error
+    artifact = ClassificationArtifact(
+        artifact_id=payload["artifact_id"],
+        original_kind=original_kind,
+        scope=payload["scope"],
+        media_type=payload["media_type"],
+        relative_label=payload["relative_label"],
+        text=payload["text"],
+        sensitivity=payload["sensitivity"],
+        redaction_reasons=reasons,
+        truncated=payload["truncated"],
+    )
+    redaction = redact_text(artifact.text)
+    if redaction.blocked or redaction.reasons:
+        raise ValueError(
+            "classification artifact contains unredacted sensitive text"
+        )
+    if _ABSOLUTE_PATH.search(artifact.text):
+        raise ValueError(
+            "classification artifact contains an absolute path"
+        )
+    return artifact
+
+
+def _inventory_artifact_from_payload(
+    payload: object,
+    *,
+    home: Path,
+    project_root: Path | None,
+) -> ArtifactRecord:
+    _require_object_keys(
+        payload,
+        _INVENTORY_ARTIFACT_KEYS,
+        "migration inventory artifact",
+    )
+    try:
+        kind = ArtifactKind(payload["kind"])
+        scope = ArtifactScope(payload["scope"])
+        sensitivity = Sensitivity(payload["sensitivity"])
+    except (TypeError, ValueError) as error:
+        raise ValueError(
+            "migration inventory artifact enum is invalid"
+        ) from error
+    boundary = home if scope is ArtifactScope.GLOBAL else project_root
+    if boundary is None:
+        raise ValueError(
+            "project inventory requires a discovered project root"
+        )
+    relative_path = normalize_relative_path(payload["relative_path"])
+    candidate = boundary.joinpath(*relative_path.split("/"))
+    try:
+        resolved = candidate.resolve(strict=True)
+        resolved.relative_to(boundary)
+    except (OSError, ValueError) as error:
+        raise ValueError(
+            "migration inventory artifact is outside the selected root "
+            "or no longer exists"
+        ) from error
+    if not (resolved.is_file() or resolved.is_dir()):
+        raise ValueError(
+            "migration inventory artifact is not a regular file or directory"
+        )
+    return ArtifactRecord(
+        artifact_id=payload["artifact_id"],
+        agent_id=payload["agent_id"],
+        kind=kind,
+        scope=scope,
+        path=resolved,
+        relative_path=relative_path,
+        sha256=payload["sha256"],
+        media_type=payload["media_type"],
+        size_bytes=payload["size_bytes"],
+        sensitivity=sensitivity,
+        already_neutral=payload["already_neutral"],
+    )
+
+
+def _require_object_keys(
+    payload: object,
+    expected: frozenset[str],
+    label: str,
+) -> None:
+    if not isinstance(payload, dict) or not all(
+        isinstance(key, str) for key in payload
+    ):
+        raise ValueError(f"{label} must be an object")
+    unknown = set(payload) - expected
+    missing = expected - set(payload)
+    if unknown:
+        raise ValueError(
+            f"{label} has unknown fields: {', '.join(sorted(unknown))}"
+        )
+    if missing:
+        raise ValueError(
+            f"{label} is missing fields: {', '.join(sorted(missing))}"
+        )
+
+
+def _string_tuple(payload: object, label: str) -> tuple[str, ...]:
+    if not isinstance(payload, list) or any(
+        not isinstance(item, str) for item in payload
+    ):
+        raise ValueError(f"{label} must be a list of strings")
+    return tuple(payload)
+
+
+def _validate_inventory_root(root: str) -> None:
+    parts = root.split(":", 2)
+    if len(parts) != 3 or _ADAPTER_ID.fullmatch(parts[0]) is None:
+        raise ValueError("migration inventory root label is invalid")
+    try:
+        ArtifactScope(parts[1])
+        normalize_relative_path(parts[2])
+    except ValueError as error:
+        raise ValueError(
+            "migration inventory root label is invalid"
+        ) from error
+
+
+def _safe_boundary(path: Path | None, label: str) -> Path:
+    if path is None:
+        raise ValueError(f"{label} is required")
+    try:
+        resolved = Path(path).resolve(strict=True)
+    except OSError as error:
+        raise ValueError(f"{label} is not a safe directory") from error
+    if not resolved.is_dir():
+        raise ValueError(f"{label} is not a safe directory")
+    return resolved
+
+
+def _redact_absolute_paths(text: str) -> tuple[str, bool]:
+    redacted, count = _ABSOLUTE_PATH.subn("<absolute-path>", text)
+    return redacted, count > 0

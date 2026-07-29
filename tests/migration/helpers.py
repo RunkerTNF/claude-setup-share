@@ -1,13 +1,21 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from pathlib import Path
 
 from agent_workflow.adapters.base import AdapterContext
+from agent_workflow.migration.classification import (
+    ClassificationDecision,
+    ClassificationResponse,
+    DecisionKind,
+    build_classification_request,
+)
 from agent_workflow.migration.model import (
     ArtifactKind,
     ArtifactRecord,
     ArtifactScope,
+    MigrationInventory,
     Sensitivity,
     derive_artifact_id,
 )
@@ -139,6 +147,80 @@ def memory_fixture(
         ),
         source,
     )
+
+
+def write_inventory_fixture(tmp_path: Path) -> tuple[Path, Path]:
+    home = tmp_path / "home"
+    source = home / ".claude" / "CLAUDE.md"
+    source.parent.mkdir(parents=True)
+    source.write_text(
+        "Keep changes reversible.\ntoken=secret-value\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    record = _file_record(
+        source,
+        relative_path=".claude/CLAUDE.md",
+        agent_id="claude",
+        kind=ArtifactKind.RULES,
+    )
+    inventory = MigrationInventory(
+        schema_version=1,
+        roots=("claude:global:.claude/CLAUDE.md",),
+        artifacts=(record,),
+        warnings=(),
+    )
+    path = tmp_path / "inventory.json"
+    path.write_text(inventory.to_json(), encoding="utf-8", newline="\n")
+    return path, home
+
+
+def write_request_fixture(tmp_path: Path) -> Path:
+    inventory_path, _ = write_inventory_fixture(tmp_path)
+    source = tmp_path / "home" / ".claude" / "CLAUDE.md"
+    record = _file_record(
+        source,
+        relative_path=".claude/CLAUDE.md",
+        agent_id="claude",
+        kind=ArtifactKind.RULES,
+    )
+    inventory = MigrationInventory(
+        schema_version=1,
+        roots=("claude:global:.claude/CLAUDE.md",),
+        artifacts=(record,),
+        warnings=(),
+    )
+    request = build_classification_request(inventory)
+    path = inventory_path.with_name("request.json")
+    path.write_text(request.to_json(), encoding="utf-8", newline="\n")
+    return path
+
+
+def write_response_fixture(
+    tmp_path: Path,
+    *,
+    request_id: str | None = None,
+) -> Path:
+    request_path = tmp_path / "request.json"
+    request_payload = json.loads(request_path.read_text(encoding="utf-8"))
+    artifact_id = request_payload["artifacts"][0]["artifact_id"]
+    response = ClassificationResponse(
+        schema_version=1,
+        request_id=request_id or request_payload["request_id"],
+        request_sha256=request_payload["request_sha256"],
+        decisions=(
+            ClassificationDecision(
+                artifact_id=artifact_id,
+                kind=DecisionKind.COMMON_RULE,
+                name="shared-rules",
+                rationale="Shared behavior for every supported agent.",
+                confidence="high",
+            ),
+        ),
+    )
+    path = tmp_path / "response.json"
+    path.write_text(response.to_json(), encoding="utf-8", newline="\n")
+    return path
 
 
 def _file_record(

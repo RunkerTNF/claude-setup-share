@@ -363,6 +363,7 @@ def _verify_global_install(home: Path) -> None:
         )
     required = (
         "workflow/agent-workflow.pyz",
+        "skills/agent-workflow-migrate/SKILL.md",
         "skills/agent-workflow-setup/SKILL.md",
     )
     for path in required:

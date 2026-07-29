@@ -13,6 +13,12 @@ from .adapters.registry import AdapterRegistry, builtin_registry
 from .errors import AgentWorkflowError
 from .doctor import run_doctor
 from .layout import plan_neutral_init
+from .migration.classification import (
+    build_classification_request,
+    load_classification_request,
+    load_classification_response,
+    load_migration_inventory,
+)
 from .model import ProjectProfile, Scope, Severity
 from .paths import HostPaths
 from .plan import TransactionPlan
@@ -66,6 +72,23 @@ def build_parser() -> argparse.ArgumentParser:
 
     rollback = subcommands.add_parser("rollback")
     rollback.add_argument("journal")
+
+    migrate = subcommands.add_parser("migrate")
+    migrate_subcommands = migrate.add_subparsers(
+        dest="migrate_command",
+        required=True,
+    )
+    classify_request = migrate_subcommands.add_parser(
+        "classify-request"
+    )
+    classify_request.add_argument("--inventory", required=True)
+    classify_request.add_argument("--output", required=True)
+    _add_host_arguments(classify_request)
+    validate_response = migrate_subcommands.add_parser(
+        "validate-response"
+    )
+    validate_response.add_argument("--request", required=True)
+    validate_response.add_argument("--response", required=True)
     return parser
 
 
@@ -93,6 +116,16 @@ def main(argv: Sequence[str] | None = None) -> int:
             return _handle_doctor(args)
         elif args.command == "rollback":
             _handle_rollback(args)
+        elif (
+            args.command == "migrate"
+            and args.migrate_command == "classify-request"
+        ):
+            return _handle_migrate_classify_request(args)
+        elif (
+            args.command == "migrate"
+            and args.migrate_command == "validate-response"
+        ):
+            return _handle_migrate_validate_response(args)
         else:
             parser.print_help()
         return 0
@@ -274,6 +307,40 @@ def _handle_doctor(args: argparse.Namespace) -> int:
 def _handle_rollback(args: argparse.Namespace) -> None:
     journal = rollback_transaction(Path(args.journal))
     print(f"rolled back transaction {journal.transaction_id}: {journal.status}; journal: {journal.journal_path}")
+
+
+def _handle_migrate_classify_request(
+    args: argparse.Namespace,
+) -> int:
+    paths = _host_paths(args)
+    inventory = load_migration_inventory(
+        Path(args.inventory),
+        home=paths.home,
+        project_root=paths.project_root,
+    )
+    request = build_classification_request(inventory)
+    output = Path(args.output)
+    output.write_text(request.to_json(), encoding="utf-8")
+    print(
+        f"wrote classification request: {output} "
+        f"({len(request.artifacts)} artifacts)"
+    )
+    return 0
+
+
+def _handle_migrate_validate_response(
+    args: argparse.Namespace,
+) -> int:
+    request = load_classification_request(Path(args.request))
+    response = load_classification_response(
+        Path(args.response),
+        request,
+    )
+    print(
+        "classification response valid: "
+        f"{len(response.decisions)} decisions"
+    )
+    return 0
 
 
 def _print_json(payload: object) -> None:
