@@ -80,6 +80,23 @@ def lint_skill(skill_dir: Path) -> tuple[Diagnostic, ...]:
     return _ordered(diagnostics)
 
 
+def parse_portable_skill_frontmatter(text: str) -> tuple[str, str, str]:
+    """Return portable skill metadata and body, rejecting invalid frontmatter."""
+    metadata, body, valid = _parse_frontmatter(text)
+    name = metadata.get("name")
+    description = metadata.get("description")
+    if (
+        not valid
+        or set(metadata) != {"name", "description"}
+        or not isinstance(name, str)
+        or _SKILL_NAME.fullmatch(name) is None
+        or not isinstance(description, str)
+        or not description.strip()
+    ):
+        raise ValueError("invalid portable skill frontmatter")
+    return name, description, body
+
+
 def _parse_frontmatter(text: str) -> tuple[dict[str, str], str, bool]:
     lines = text.splitlines(keepends=True)
     if not lines or lines[0].rstrip("\r\n") != "---":
