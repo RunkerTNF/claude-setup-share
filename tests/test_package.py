@@ -40,6 +40,18 @@ def test_built_zipapp_runs_without_source_tree(tmp_path: Path) -> None:
         assert b"\r\n" not in package.read("agent_workflow/setup.py")
 
 
+def test_zipapp_is_independent_of_platform_deflate_backend(
+    tmp_path: Path,
+) -> None:
+    archive = tmp_path / "agent-workflow.pyz"
+    archive.write_bytes(build_manager_zipapp(Path.cwd()))
+
+    with zipfile.ZipFile(archive) as package:
+        assert {entry.compress_type for entry in package.infolist()} == {
+            zipfile.ZIP_STORED
+        }
+
+
 def test_zipapp_rejects_missing_or_symlinked_source(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="source root"):
         build_manager_zipapp(tmp_path / "missing")

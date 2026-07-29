@@ -36,18 +36,13 @@ def build_manager_zipapp(source_root: Path) -> bytes:
     )
 
     output = BytesIO()
-    with zipfile.ZipFile(
-        output,
-        mode="w",
-        compression=zipfile.ZIP_DEFLATED,
-        compresslevel=9,
-    ) as archive:
+    with zipfile.ZipFile(output, mode="w") as archive:
         for name in sorted(files):
             info = zipfile.ZipInfo(name, date_time=_TIMESTAMP)
-            info.compress_type = zipfile.ZIP_DEFLATED
+            info.compress_type = zipfile.ZIP_STORED
             info.create_system = 3
             info.external_attr = 0o100644 << 16
-            archive.writestr(info, files[name], compresslevel=9)
+            archive.writestr(info, files[name])
     return output.getvalue()
 
 
