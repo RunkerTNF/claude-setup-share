@@ -1,185 +1,205 @@
-# Установка
+# Установка и перенастройка Agent Workflow
 
-## Предпосылки
+Этот документ описывает fresh setup, project profiles, legacy migration,
+добавление агента и восстановление. Короткая инструкция для первого запуска —
+[SETUP.md](SETUP.md).
 
-- **Node.js.** Нужен для `statusline.js` (строка статуса в Claude Code) и для `code-transfer` (если используешь двухмашинный воркфлоу).
+## Требования
 
-## Структура архива
+- Python 3.11 или новее;
+- скачанный checkout этого репозитория для первой global-установки или
+  global-upgrade;
+- Git repository для project scope;
+- Claude Code и/или Codex, либо явно предоставленный внешний adapter.
 
-```
-claude-setup-share/
-├── README.md              # главный гайд по сетапу — читать первым
-├── INSTALL.md             # этот файл
-└── home-claude/           # содержимое для ~/.claude/
-    ├── CLAUDE.md.example
-    ├── settings.json.example
-    ├── statusline.js
-    ├── workitems-rendering.md   # shared rules для /morning, /tasks, /my-reviews, /feedback
-    ├── agents/
-    └── commands/
-```
+Setup не требует сети. Node.js нужен только при явном включении опционального
+Claude statusline.
 
-> Тулза двухмашинного sync'а — `code-transfer` — теперь живёт отдельной репой: [RunkerTNF/code-transfer](https://github.com/RunkerTNF/code-transfer).
+В примерах `MANAGER` означает одну из команд:
 
-## Шаги
-
-### 1. Скопировать содержимое `home-claude/` в `~/.claude/`
-
-Linux/macOS:
-
-```bash
-cp -rn home-claude/agents ~/.claude/
-cp -rn home-claude/commands ~/.claude/
-cp -n home-claude/statusline.js ~/.claude/
-cp -n home-claude/workitems-rendering.md ~/.claude/
+```text
+agent-workflow
+python ~/.agents/workflow/agent-workflow.pyz
 ```
 
-Windows (Git Bash):
+На Windows вместо `~` укажите фактический home path.
 
-```bash
-cp -rn home-claude/agents /c/Users/<USER>/.claude/
-cp -rn home-claude/commands /c/Users/<USER>/.claude/
-cp -n home-claude/statusline.js /c/Users/<USER>/.claude/
-cp -n home-claude/workitems-rendering.md /c/Users/<USER>/.claude/
+## Fresh global setup
+
+Самый короткий human-led flow из checkout:
+
+```text
+python scripts/bootstrap.py --target claude --target codex
+python scripts/bootstrap.py --target claude --target codex --apply
 ```
 
-Флаг `-n` / `-rn` — «не перезаписывать существующие». Если у вас там уже что-то лежит — эти файлы не затрутся, разруливать руками.
+Первая команда выполняет `setup detect` и `setup preview`, записей не делает.
+Вторая заново материализует preview и перед записью спрашивает подтверждение.
+Для неинтерактивного уже подтверждённого запуска можно добавить `--yes`.
 
-`workitems-rendering.md` — это shared rendering-rules, на которые ссылаются workitems-команды (`/morning`, `/tasks`, `/my-reviews`, `/feedback`). Должен лежать прямо в `~/.claude/`, иначе команды не найдут правила и будут жаловаться.
+Эквивалентный явный manager flow:
 
-### 2. Положить `CLAUDE.md` — переработать под себя
-
-```bash
-cp home-claude/CLAUDE.md.example ~/.claude/CLAUDE.md
+```text
+python -m agent_workflow setup detect --scope global --home HOME
+python -m agent_workflow setup preview --scope global --home HOME --source-root CHECKOUT --target claude --target codex --output setup-plan.json
+python -m agent_workflow setup apply --plan setup-plan.json
 ```
 
-**Обязательно отредактируйте.** Там прибито гвоздями:
+Запускайте `python -m agent_workflow` из checkout с `src` на `PYTHONPATH`.
+Применяйте только тот plan, который был показан пользователю. После apply:
 
-- Двухмашинный workflow (домашний ПК + корп-ноут) и описание `code-transfer` — если у вас одна машина, убирайте весь блок про неё.
-- Пути типа `C:\Users\Runker\sync-projects\...` — поменять на свои или удалить.
-- Правила `.syncprotect` — убирать, если не используете `code-transfer`.
-- Раздел про Windows / Git Bash — оставить, если у вас тоже Windows; иначе удалить.
-
-Что **точно оставить**, иначе ломается workflow:
-
-- Блок `Shared Claude tooling in ~/.claude/` (описание сабагентов и слэш-команд).
-- Блок `Default review workflow` — это основа для автоматического вызова `plan-reviewer` / `code-reviewer`.
-- Блок `Claude Code harness quirks` (короткая заметка про `settings.local.json`).
-
-### 3. Настройка пермишенов
-
-Концептуально про систему пермишенов и про то, **как тюнить allow-list по мере доверия к Claude**, написано в [README.md разделе 12](README.md). Ниже только техника.
-
-Claude хранит пермишены в двух файлах в каждой директории `.claude/`:
-
-| Файл | Что внутри |
-|---|---|
-| `settings.json` | **Курируется руками.** Долгоживущие разрешения (и запреты), которые ты осознанно добавил. |
-| `settings.local.json` | **Авто-генерируется.** Сюда Claude сам пишет one-shot allow'ы, когда ты на prompt'е жмёшь «Always allow». Локальный мусорник, в гит не коммитить. |
-
-Эта пара живёт на двух уровнях:
-
-- **Глобальный:** `~/.claude/settings.json` (применяется всегда).
-- **Проектный:** `<repo>/.claude/settings.json` (применяется только в этом проекте, имеет приоритет над глобальным).
-
-Базовый синтаксис `settings.json`:
-
-```json
-{
-  "permissions": {
-    "allow": [
-      "Bash(git status:*)",
-      "Bash(ls:*)"
-    ],
-    "deny": [
-      "Bash(rm -rf *)"
-    ]
-  }
-}
+```text
+python ~/.agents/workflow/agent-workflow.pyz doctor --scope global
 ```
 
-- `Bash(<команда>:*)` — разрешить любой вариант `<команда> ...` без prompt'а.
-- Узкие паттерны лучше широких. Никаких `Bash(*)`.
-- `deny` — жёсткий запрет, побеждает `allow` при конфликте.
+Глобально по умолчанию устанавливаются management skills
+`agent-workflow-setup`, `agent-workflow-migrate` и portable workflow skills.
+Обычный skill можно исключить только явно:
 
-В архиве есть `home-claude/settings.json.example` — можно скопировать как стартовый набор глобальных пермишенов:
-
-```bash
-cp home-claude/settings.json.example ~/.claude/settings.json
+```text
+python scripts/bootstrap.py --target codex --exclude-skill morning
 ```
 
-Содержит безопасные read-only паттерны (`ls`, `stat`, `git status`, `git diff`, `git log`, ...) и моё личное предпочтение `effortLevel: xhigh` (можно убрать, если не нужно).
+Management skills исключить нельзя. Исключение отображается в preview и
+manifest. Ранее управляемый skill удаляется только при совпадении hash;
+пользовательские изменения вызывают conflict.
 
-Поле `"autoMemoryDirectory": "~/.claude/memory"` указывает на единое место под глобальную память (см. [README раздел 2](README.md)) — без этого поля Claude свалится на дефолтный slug-based путь `~/.claude/projects/<encoded-cwd>/memory/`, который ломается при переезде/переименовании проектов.
+Опциональный Claude statusline включается отдельно и не загружается Codex:
 
-**Не забудьте** в `home-claude/settings.json.example` поправить путь к `statusline.js`: там placeholder `/c/Users/<USER>/.claude/statusline.js`. Замените `<USER>` на свой логин; для Linux/macOS — `/home/<USER>/.claude/statusline.js`. Tilde `~` в этом поле может не разворачиваться — лучше абсолютный путь.
-
-### 4. Плагины (опционально)
-
-В `home-claude/settings.json.example` указаны два плагина:
-
-- **`context7@claude-plugins-official`** — актуальная документация библиотек, чтобы Claude не галлюцинировал API по устаревшему тренинг-дата.
-- **`superpowers@claude-plugins-official`** — набор продвинутых скиллов: `brainstorming`, `writing-plans`, `executing-plans`, `systematic-debugging`, `fewer-permission-prompts` и другие.
-
-Оба — из дефолтного `claude-plugins-official` marketplace, доступного из коробки. Если у вас старый Claude Code и эти плагины не находятся — обновите Claude или удалите блок `enabledPlugins` из `settings.json`. При первом старте Claude предложит скачать включённые плагины — соглашайтесь.
-
-### 5. Проверка
-
-Запустите Claude Code в любой тестовой директории и проверьте, что команды доступны:
-
-```
-/init-claude
+```text
+python scripts/bootstrap.py --target claude --include-claude-statusline
 ```
 
-Если команда нашлась и начала работать — всё ок.
+Проверьте `src/agent_workflow/adapters/claude/templates/settings.example.json`
+и вручную адаптируйте нативные settings; credentials там быть не должно.
 
-## Использование в новом проекте
+## Agent-led setup
 
-```bash
-cd /path/to/new/project
-claude
+Если checkout передан агенту, попросите его прочитать [SETUP.md](SETUP.md).
+Агент должен:
+
+1. проверить Python;
+2. выполнить read-only detection;
+3. спросить scope, targets и для проекта profile;
+4. показать warnings, conflicts и все операции preview;
+5. получить явное подтверждение именно этого plan;
+6. применить plan и запустить doctor;
+7. предложить fresh-session smoke для каждого выбранного агента.
+
+Detection не является согласием на настройку найденного агента.
+
+## Настройка проекта
+
+Сначала нужна успешная global-установка. Project setup использует
+установленный manager и не зависит от bootstrap clone:
+
+```text
+python ~/.agents/workflow/agent-workflow.pyz setup detect --scope project --project PROJECT --profile split --home HOME
+python ~/.agents/workflow/agent-workflow.pyz setup preview --scope project --project PROJECT --profile split --home HOME --target claude --target codex --output project-plan.json
+python ~/.agents/workflow/agent-workflow.pyz setup apply --plan project-plan.json
+python ~/.agents/workflow/agent-workflow.pyz doctor --scope project --cwd PROJECT --home HOME
 ```
 
-В первой сессии:
+Выберите один profile:
 
+- `local` — `.agents/` и локальные native entrypoints добавляются в managed
+  `.gitignore`;
+- `shared` — project workflow и native shared entrypoints предназначены для
+  version control;
+- `split` — `.agents/RULES.md` и project skills можно делить, а
+  `.agents/memory/`, `.agents/sessions/`, `.agents/overlays/` остаются
+  локальными.
+
+Добавьте `--manage-syncprotect`, только если текущий sync tool действительно
+использует `.syncprotect`. Manager изменяет только свой marked block.
+Подробности: [docs/project-profiles.md](docs/project-profiles.md).
+
+Project setup не дублирует global skills. Project-scoped skills появляются,
+только если пользователь добавил их в project `.agents/skills/` или импортировал
+через migration.
+
+## Migration Claude-only, Codex-only или mixed state
+
+Fresh setup не трогает legacy files. После global setup используйте
+`agent-workflow-migrate` или явный CLI flow:
+
+```text
+MANAGER migrate scan --scope global --targets claude codex --output inventory.json
+MANAGER migrate normalize --inventory inventory.json --output normalized.json
+MANAGER migrate classify-request --inventory inventory.json --output request.json
+MANAGER migrate plan --scope global --targets claude codex --inventory inventory.json --normalized normalized.json --response response.json --imported-at TIMESTAMP --output migration-plan.json
+MANAGER migrate report --plan migration-plan.json --output migration-preview.md
+MANAGER migrate apply --plan migration-plan.json
 ```
-/init-claude
+
+`--response` нужен только при наличии ambiguous artifacts в request. Сначала
+создайте его по закрытому classification contract и выполните
+`migrate validate-response`.
+
+По умолчанию migration сохраняет исходные `.claude`/`.codex` files. Нативная
+замена — отдельный opt-in `--replace-native`. Полный процесс, privacy boundary
+и mapping states: [docs/migration.md](docs/migration.md).
+
+## Добавление агента и reconfigure
+
+Для нового агента снова скачайте актуальный checkout и выполните global
+`setup preview` с полным желаемым списком targets и `--source-root CHECKOUT`.
+Не передавайте только новый target: preview должен отражать итоговую
+конфигурацию.
+
+Внешний declarative adapter:
+
+```text
+MANAGER setup preview --scope global --home HOME --source-root CHECKOUT --target existing --target new-agent --adapter-dir ADAPTERS --output setup-plan.json
 ```
 
-Создаст локальный `CLAUDE.md` + `.claude/memory/` + `.claude/sessions/` + `.claude/settings.json`. `CLAUDE.md` он заполнит частично — то, что можно автоматически вытащить из `pyproject.toml` / `package.json` / `go.mod` и т.п. (имя проекта, рантайм, точки входа, env-переменные). А вот блоки уровня архитектуры там останутся как `TODO`-плейсхолдеры (data flow, entity relationships, public vs internal interfaces, consistency guarantees) — `/init-claude` намеренно их не угадывает.
+Если package содержит `adapter.py`, добавьте
+`--trust-adapter-code new-agent` только после review кода. Без trust такой
+adapter блокируется и не исполняется.
 
-**Сразу после `/init-claude`, не закрывая сессию, продолжите общение** и попросите Claude пройтись по этим `TODO` вместе с вами. Что-то типа: «прочитай главные файлы из X/Y/Z, поковыряй структуру и заполни оставшиеся `TODO`-секции в `CLAUDE.md`». Он покопается в коде, предложит черновик заполнения — вы по ходу поправите неточности. Это самый дешёвый момент чтобы получить хороший `CLAUDE.md`: вы уже в контексте проекта, Claude уже читает файлы, а потраченные 15 минут диалога окупятся на каждой следующей сессии (Claude не будет читать пол-репо в начале каждой задачи).
+Для изменения profile проекта создайте новый project preview с желаемым
+profile. Для удаления optional skill используйте `--exclude-skill NAME`.
+Любой unmanaged drift надо сначала разобрать вручную; не подменяйте hashes.
 
-В конце сессии:
+## Checkout можно удалить
 
+После успешной global-установки и doctor bootstrap checkout можно удалить.
+Остаются:
+
+- `~/.agents/workflow/agent-workflow.pyz`;
+- `~/.agents/manifest.json`;
+- `~/.agents/skills/`;
+- `~/.agents/workflow/journals/` и `backups/`;
+- сгенерированные native entrypoints выбранных agents.
+
+Checkout снова нужен только для global-upgrade/reconfigure на новую версию
+поставляемого manager или skills. Project setup и migration работают без него.
+
+## Restore и uninstall
+
+Каждый apply печатает transaction journal. Для отката точной транзакции:
+
+```text
+MANAGER rollback JOURNAL_PATH
+MANAGER doctor --scope global --home HOME
 ```
-/wrap
-```
 
-Через несколько сессий, когда накопились session notes:
+Rollback проверяет hashes и отказывается затирать последующие изменения.
+Откатывайте связанные транзакции в обратном порядке.
 
-```
-/backlog
-```
+Отдельной команды `uninstall` пока нет. Для полного удаления:
 
-Старт работы над беклог-айтемом:
+1. сохраните нужную ручную память и user-authored skills;
+2. прочитайте manifest и journals;
+3. откатите применённые setup/migration transactions в обратном порядке;
+4. убедитесь, что native entrypoints больше не ссылаются на `.agents`;
+5. удаляйте оставшиеся managed artifacts только после проверки ownership.
 
-```
-/pick <id>
-```
+Никогда не удаляйте весь `.claude`, `.codex` или project root по manifest:
+там могут быть пользовательские файлы, которыми manager не владеет.
 
-## `code-transfer` (опционально)
+## Если что-то не работает
 
-Если у вас, как у меня, домашний ПК с Claude Code и корп-ноут без него — есть смысл поднять `code-transfer`. Зачем оно, концептуально и с примерами цикла push/pull — в [README.md разделах 5 и 6](README.md). Сама тулза и технические шаги (поднять сервер, скачать CLI, прописать `~/.syncrc`) — в отдельной репе [RunkerTNF/code-transfer](https://github.com/RunkerTNF/code-transfer).
-
-## Note: путь `sync-projects` в `init-claude.md`
-
-Слэш-команда `/init-claude` определяет «sync-project» по жёстко прописанному пути `C:\Users\Runker\sync-projects\` (внутри файла [home-claude/commands/init-claude.md](home-claude/commands/init-claude.md), Step 1). Если используете `code-transfer` и ваш local projects-dir отличается — отредактируйте этот check у себя в `~/.claude/commands/init-claude.md`. Если `code-transfer` не используете — на скрипт это не влияет, он просто всегда будет считать `is_sync_project = false`.
-
-## Траблшутинг
-
-- **Слэш-команды не находятся.** Проверь, что `.md`-файлы лежат в `~/.claude/commands/` (а не в подпапке) и у них есть frontmatter с `description:`.
-- **Сабагенты не вызываются автоматически.** Убедись, что в глобальном `CLAUDE.md` есть секция `Default review workflow`, а файлы лежат в `~/.claude/agents/`.
-- **`statusline.js` не работает.** Путь в `settings.json` должен быть абсолютным и указывать на твоего пользователя. На Windows — `/c/Users/<USER>/.claude/statusline.js`.
-- **`/init-claude` ругается на отсутствие директории.** Запускай из корня проекта (там, где `pyproject.toml` / `package.json` / `.git`).
-- **На каждое действие выскакивает prompt.** См. README раздел 12 («Тюнинг пермишенов на доверии») и шаг 3 здесь.
+Сначала запустите doctor, затем откройте
+[docs/troubleshooting.md](docs/troubleshooting.md). Правила no-clobber,
+backups и trust boundary описаны в [docs/safety.md](docs/safety.md).
