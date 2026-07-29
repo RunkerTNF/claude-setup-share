@@ -223,6 +223,25 @@ def test_resource_loader_rejects_bundled_symlink_escape(
         load_bundled_resource("templates/core/global-rules.md")
 
 
+def test_resource_loader_rejects_bundled_root_symlink_escape(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    package_root = tmp_path / "package"
+    package_root.mkdir()
+    external_bundle = tmp_path / "external-bundle"
+    template = external_bundle / "templates" / "core" / "global-rules.md"
+    template.parent.mkdir(parents=True)
+    template.write_text("outside", encoding="utf-8")
+    try:
+        (package_root / "_bundled").symlink_to(external_bundle, target_is_directory=True)
+    except OSError:
+        pytest.skip("directory symlink creation is unavailable")
+    monkeypatch.setattr(resources_module.resources, "files", lambda _: package_root)
+
+    with pytest.raises(ValueError, match="escapes package resources"):
+        load_bundled_resource("templates/core/global-rules.md")
+
+
 def test_resource_loader_does_not_infer_source_checkout_from_installed_location(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -21,7 +21,9 @@ def bundled_resource_source(relative_path: str) -> Path | None:
 def _load_resource(relative_path: str) -> tuple[bytes, Path | None]:
     normalized = normalize_relative_path(relative_path)
     parts = normalized.split("/")
-    bundled_root = resources.files("agent_workflow").joinpath("_bundled")
+    package_root = resources.files("agent_workflow")
+    bundled_root = package_root.joinpath("_bundled")
+    _validate_filesystem_containment(package_root, bundled_root, "package resources")
     bundled = bundled_root.joinpath(*parts)
     if bundled.is_file():
         _validate_filesystem_containment(bundled_root, bundled, "bundled resources")
