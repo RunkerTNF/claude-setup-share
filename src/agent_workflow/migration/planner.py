@@ -8,7 +8,11 @@ import re
 import tomllib
 from typing import Iterable
 
+from agent_workflow import __version__
+from agent_workflow.adapters.base import AdapterContext
+from agent_workflow.adapters.registry import builtin_registry
 from agent_workflow.hashing import sha256_file
+from agent_workflow.manifest import WorkflowManifest
 from agent_workflow.model import (
     Ownership,
     ProjectProfile,
@@ -42,6 +46,7 @@ from .normalize import (
     ArtifactProvenance,
     NormalizationBatch,
     NormalizedArtifact,
+    merge_memory_index,
     normalize_deterministic,
     resolve_normalized_collisions,
 )
@@ -51,6 +56,15 @@ from .report import MigrationReport
 
 _ADAPTER_ID = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 _PORTABLE_NAME = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+_REPLACEMENT_KEYS = frozenset(
+    {
+        "replacement_sha256",
+        "scope",
+        "source_agent",
+        "source_relative_path",
+        "source_sha256",
+    }
+)
 _RESULT_KEYS = {
     "schema_version",
     "inventory_sha256",
@@ -466,6 +480,7 @@ def build_migration_plan(
     source_mappings: list[str] = []
     sensitive_skips: list[str] = []
     import_operations: list[WriteOperation] = []
+    imported_memory: list[NormalizedArtifact] = []
     migrated_identities: set[tuple[str, str, str]] = set()
     deterministic_identities = {
         (
@@ -512,6 +527,8 @@ def build_migration_plan(
             )
             continue
         migrated_identities.add(identity)
+        if artifact.kind is ArtifactKind.MANUAL_MEMORY:
+            imported_memory.append(artifact)
         source_mappings.append(
             f"{provenance.source_agent}:"
             f"{provenance.source_relative_path} -> "
@@ -533,6 +550,33 @@ def build_migration_plan(
                     root_id="neutral",
                     path=path,
                     content=content,
+                    expected_sha256=None,
+                    ownership=Ownership.CANONICAL,
+                )
+            )
+
+    if imported_memory:
+        index_content = merge_memory_index(
+            imported_memory,
+            imported_at=options.imported_at,
+        )
+        index_path = "memory/IMPORTED.md"
+        target = options.neutral_root / "memory" / "IMPORTED.md"
+        current = _safe_current_hash(target)
+        desired = hashlib.sha256(index_content).hexdigest()
+        if current == desired:
+            pass
+        elif current is not None:
+            conflicts.append(
+                "unmanaged destination differs: "
+                f"neutral:{index_path}"
+            )
+        else:
+            import_operations.append(
+                WriteOperation.from_bytes(
+                    root_id="neutral",
+                    path=index_path,
+                    content=index_content,
                     expected_sha256=None,
                     ownership=Ownership.CANONICAL,
                 )
@@ -614,7 +658,9 @@ def build_migration_plan(
         conflicts = sorted(set((*conflicts, *mapping_blockers)))
         replacement_plan = None
     else:
-        replacement_operations: list[DeleteOperation] = []
+        replacement_operations: list[
+            WriteOperation | DeleteOperation
+        ] = []
         for record in records:
             identity = (
                 record.agent_id,
@@ -624,8 +670,7 @@ def build_migration_plan(
             if (
                 identity not in migrated_identities
                 or record.already_neutral
-                or record.kind
-                in {
+                or record.kind in {
                     ArtifactKind.RULES,
                     ArtifactKind.SETTINGS,
                     ArtifactKind.PERMISSIONS,
@@ -641,12 +686,34 @@ def build_migration_plan(
             replacement_operations.extend(operations)
             if operations:
                 replaced_ids.add(record.artifact_id)
-        replacement_plan = TransactionPlan.new(
-            scope_root=str(options.neutral_root),
-            target_roots=target_roots,
-            allowed_roots=allowed_roots,
-            operations=tuple(replacement_operations),
-        )
+        if options.targets:
+            (
+                entrypoint_operations,
+                entrypoint_replaced_ids,
+                entrypoint_blockers,
+            ) = _native_entrypoint_replacements(
+                records,
+                migrated_identities,
+                options,
+            )
+        else:
+            entrypoint_operations = ()
+            entrypoint_replaced_ids = frozenset()
+            entrypoint_blockers = ()
+        replacement_operations.extend(entrypoint_operations)
+        replaced_ids.update(entrypoint_replaced_ids)
+        if entrypoint_blockers:
+            conflicts = sorted(
+                set((*conflicts, *entrypoint_blockers))
+            )
+            replacement_plan = None
+        else:
+            replacement_plan = TransactionPlan.new(
+                scope_root=str(options.neutral_root),
+                target_roots=target_roots,
+                allowed_roots=allowed_roots,
+                operations=tuple(replacement_operations),
+            )
 
     preserved = tuple(
         f"{record.agent_id}:{record.relative_path}"
@@ -901,6 +968,247 @@ def _source_delete_operations(
             )
         )
     return tuple(operations)
+
+
+def _native_entrypoint_replacements(
+    records: tuple[ArtifactRecord, ...],
+    migrated_identities: set[tuple[str, str, str]],
+    options: MigrationOptions,
+) -> tuple[
+    tuple[WriteOperation, ...],
+    frozenset[str],
+    tuple[str, ...],
+]:
+    manifest_path = options.neutral_root / "manifest.json"
+    if not manifest_path.is_file() or manifest_path.is_symlink():
+        return (), frozenset(), (
+            "native replacement requires a valid neutral manifest",
+        )
+    try:
+        manifest = WorkflowManifest.from_json(
+            manifest_path.read_text(encoding="utf-8")
+        )
+    except (OSError, UnicodeError, ValueError):
+        return (), frozenset(), (
+            "native replacement requires a valid neutral manifest",
+        )
+
+    context = AdapterContext(
+        home=options.home,
+        project_root=options.project_root,
+        neutral_root=options.neutral_root,
+        scope=options.scope,
+        profile=options.profile,
+        generator_version=__version__,
+    )
+    try:
+        adapters = builtin_registry().require(options.targets)
+    except ValueError:
+        return (), frozenset(), (
+            "native replacement supports only installed built-in adapters",
+        )
+
+    rules_by_entrypoint = {
+        (record.agent_id, record.relative_path): record
+        for record in records
+        if record.kind is ArtifactKind.RULES
+    }
+    operations: list[WriteOperation] = []
+    replaced_ids: set[str] = set()
+    replacements: list[dict[str, str]] = []
+    blockers: list[str] = []
+    for adapter in adapters:
+        for operation in adapter.plan_entrypoints(context):
+            record = rules_by_entrypoint.get(
+                (adapter.id, operation.path)
+            )
+            if operation.expected_sha256 is not None:
+                if record is None:
+                    managed_digest = manifest.generated_files.get(
+                        f"scope:{operation.path}"
+                    )
+                    if managed_digest != operation.expected_sha256:
+                        blockers.append(
+                            "native entrypoint is not a migrated or "
+                            f"manager-owned source: {adapter.id}:"
+                            f"{operation.path}"
+                        )
+                        continue
+                else:
+                    identity = (
+                        record.agent_id,
+                        record.relative_path,
+                        record.sha256,
+                    )
+                    if identity not in migrated_identities:
+                        blockers.append(
+                            "native entrypoint was not fully migrated: "
+                            f"{adapter.id}:{operation.path}"
+                        )
+                        continue
+                    replaced_ids.add(record.artifact_id)
+                    replacements.append(
+                        {
+                            "source_agent": record.agent_id,
+                            "scope": record.scope.value,
+                            "source_relative_path": (
+                                record.relative_path
+                            ),
+                            "source_sha256": record.sha256,
+                            "replacement_sha256": hashlib.sha256(
+                                operation.content_bytes()
+                            ).hexdigest(),
+                        }
+                    )
+            operations.append(operation)
+
+    if blockers:
+        return (), frozenset(), tuple(sorted(set(blockers)))
+
+    generated_files = dict(manifest.generated_files)
+    for operation in operations:
+        generated_files[
+            f"{operation.root_id}:{operation.path}"
+        ] = hashlib.sha256(operation.content_bytes()).hexdigest()
+
+    if replacements:
+        provenance_path = (
+            options.neutral_root
+            / "workflow"
+            / "migration-replacements.json"
+        )
+        try:
+            prior_replacements, provenance_expected = (
+                _load_replacement_provenance(
+                    provenance_path,
+                    manifest,
+                )
+            )
+        except ValueError as error:
+            return (), frozenset(), (str(error),)
+        replacement_by_identity = {
+            tuple(item[key] for key in sorted(_REPLACEMENT_KEYS)): item
+            for item in (*prior_replacements, *replacements)
+        }
+        provenance = (
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "replacements": sorted(
+                        replacement_by_identity.values(),
+                        key=lambda item: (
+                            item["scope"],
+                            item["source_agent"],
+                            item["source_relative_path"],
+                            item["source_sha256"],
+                        ),
+                    ),
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n"
+        ).encode("utf-8")
+        operations.append(
+            WriteOperation.from_bytes(
+                root_id="neutral",
+                path="workflow/migration-replacements.json",
+                content=provenance,
+                expected_sha256=provenance_expected,
+                ownership=Ownership.GENERATED,
+            )
+        )
+        generated_files[
+            "neutral:workflow/migration-replacements.json"
+        ] = hashlib.sha256(provenance).hexdigest()
+
+    updated_manifest = WorkflowManifest(
+        schema_version=manifest.schema_version,
+        generator_version=__version__,
+        scope=manifest.scope,
+        profile=manifest.profile,
+        targets=tuple(
+            sorted(set((*manifest.targets, *options.targets)))
+        ),
+        generated_files=generated_files,
+        bootstrap_root=manifest.bootstrap_root,
+    )
+    operations.append(
+        WriteOperation.from_bytes(
+            root_id="neutral",
+            path="manifest.json",
+            content=updated_manifest.to_json().encode("utf-8"),
+            expected_sha256=sha256_file(manifest_path),
+            ownership=Ownership.GENERATED,
+        )
+    )
+    return (
+        tuple(operations),
+        frozenset(replaced_ids),
+        (),
+    )
+
+
+def _load_replacement_provenance(
+    path: Path,
+    manifest: WorkflowManifest,
+) -> tuple[tuple[dict[str, str], ...], str | None]:
+    current = _safe_current_hash(path)
+    if current is None:
+        return (), None
+    if (
+        manifest.generated_files.get(
+            "neutral:workflow/migration-replacements.json"
+        )
+        != current
+    ):
+        raise ValueError(
+            "native replacement provenance is not manager-owned"
+        )
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise ValueError(
+            "native replacement provenance is invalid"
+        ) from error
+    if (
+        not isinstance(payload, dict)
+        or set(payload) != {"schema_version", "replacements"}
+        or payload["schema_version"] != 1
+        or not isinstance(payload["replacements"], list)
+    ):
+        raise ValueError("native replacement provenance is invalid")
+    output: list[dict[str, str]] = []
+    for item in payload["replacements"]:
+        if (
+            not isinstance(item, dict)
+            or set(item) != _REPLACEMENT_KEYS
+            or any(not isinstance(value, str) for value in item.values())
+        ):
+            raise ValueError(
+                "native replacement provenance is invalid"
+            )
+        if _ADAPTER_ID.fullmatch(item["source_agent"]) is None:
+            raise ValueError(
+                "native replacement provenance is invalid"
+            )
+        try:
+            ArtifactScope(item["scope"])
+            normalized = normalize_relative_path(
+                item["source_relative_path"]
+            )
+            validate_sha256(item["source_sha256"])
+            validate_sha256(item["replacement_sha256"])
+        except ValueError as error:
+            raise ValueError(
+                "native replacement provenance is invalid"
+            ) from error
+        if normalized != item["source_relative_path"]:
+            raise ValueError(
+                "native replacement provenance is invalid"
+            )
+        output.append(dict(item))
+    return tuple(output), current
 
 
 def _safe_current_hash(path: Path) -> str | None:

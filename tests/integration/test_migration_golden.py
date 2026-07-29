@@ -42,6 +42,19 @@ def test_conflict_fixture_remains_dry_run_only(tmp_path: Path) -> None:
     assert "Blocking conflicts" in result.preview
 
 
+def test_imported_rules_and_memory_are_discoverable(
+    tmp_path: Path,
+) -> None:
+    result = run_fixture_migration("claude-only", tmp_path)
+
+    assert "rules/" in result.tree["RULES.md"]["text"]
+    assert "memory/IMPORTED.md" in result.tree[
+        "memory/MEMORY.md"
+    ]["text"]
+    imported_index = result.tree["memory/IMPORTED.md"]["text"]
+    assert "memory/preferences-from-claude.md" in imported_index
+
+
 def test_current_repository_fixture_keeps_full_legacy_shape() -> None:
     fixture = Path("tests/fixtures/legacy/current-repository")
     expected = {

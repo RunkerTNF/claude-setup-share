@@ -148,6 +148,10 @@ copied byte-for-byte only when the whole directory is portable.
 
 Manual memory is durable user-authored knowledge and migrates to
 `.agents/memory/` with source agent, scope, relative label, and source hash.
+The manager writes the deterministic `.agents/memory/IMPORTED.md` provenance
+index, and the canonical memory index points agents to it. Imported common
+rules remain separate under `.agents/rules/`; canonical `RULES.md` requires
+agents to load those files in stable order.
 Native automatic memory is not equivalent. It stays excluded by default; with
 `--include-native-cache`, selected entries go only to
 `.agents/cache/AGENT/memory/` and never become authoritative manual memory.
@@ -172,16 +176,21 @@ The default plan imports neutral content and preserves every source. This is a
 valid long-term mode: omit `--replace-native`, keep using the old native
 configuration, and adopt neutral files gradually.
 
-To request cleanup of fully migrated legacy commands, skills, memory, or
-sessions, rebuild the plan with `--replace-native`. This is a separate decision
-from confirming apply. Unsupported settings, credentials, unknown artifacts,
-and native instruction files that still need manual reconciliation remain in
-place. The preview lists every preserved source.
+To request cleanup, rebuild the plan with `--replace-native`. This is a
+separate decision from confirming apply. Fully migrated legacy commands,
+skills, memory, and sessions are removed through exact-hash delete operations.
+For the guaranteed built-in adapters, a fully migrated native instruction file
+is atomically replaced by the generated entrypoint instead of being deleted.
+The neutral manifest records the generated entrypoint, while
+`workflow/migration-replacements.json` records both original and replacement
+hashes. Unsupported settings, credentials, unknown artifacts, and
+unreconciled instruction files remain in place. The preview lists every
+preserved source.
 
-After reviewing imported rules, a user may separately replace an old native
-instruction file with the generated adapter entrypoint through the normal
-setup workflow. Do not delete the old file until its imported content is
-verified and a backup exists.
+External adapters can participate in import and mapping, but automatic native
+replacement requires installed built-in planning support. Keep the old native
+files and finish their adapter-specific entrypoints manually when that support
+is unavailable.
 
 ## Backup, rollback, and recovery
 
