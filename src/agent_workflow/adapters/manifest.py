@@ -29,11 +29,15 @@ _TOP_LEVEL_KEYS = frozenset(
         "smoke",
     }
 )
-_SCOPE_KEYS = frozenset(
+_SCOPE_REQUIRED_KEYS = frozenset(
     {"discovery_paths", "instruction_entrypoints", "skill_locations"}
 )
+_SCOPE_ALLOWED_KEYS = _SCOPE_REQUIRED_KEYS | {"inventory_roots"}
 _ENTRYPOINT_KEYS = frozenset({"target", "template", "profiles"})
 _SKILL_LOCATION_KEYS = frozenset({"path", "mode"})
+_INVENTORY_ROOT_KEYS = frozenset(
+    {"path", "kind", "recursive", "include_globs"}
+)
 
 
 @dataclass(frozen=True)
@@ -50,10 +54,19 @@ class SkillLocation:
 
 
 @dataclass(frozen=True)
+class InventoryRootSpec:
+    path: str
+    kind: str
+    recursive: bool
+    include_globs: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class AdapterScopeManifest:
     discovery_paths: tuple[str, ...]
     instruction_entrypoints: tuple[InstructionEntrypoint, ...]
     skill_locations: tuple[SkillLocation, ...]
+    inventory_roots: tuple[InventoryRootSpec, ...]
 
 
 @dataclass(frozen=True)
@@ -155,7 +168,12 @@ class AdapterManifest:
 
 def _scope_manifest(payload: object, label: str) -> AdapterScopeManifest:
     data = _mapping(payload, f"{label} adapter section")
-    _require_keys(data, _SCOPE_KEYS, f"{label} adapter section")
+    _require_keys(
+        data,
+        _SCOPE_REQUIRED_KEYS,
+        f"{label} adapter section",
+        allowed=_SCOPE_ALLOWED_KEYS,
+    )
     discovery_paths = tuple(
         normalize_relative_path(path)
         for path in _string_tuple(
@@ -227,10 +245,46 @@ def _scope_manifest(payload: object, label: str) -> AdapterScopeManifest:
                 mode=mode,
             )
         )
+    inventory_payload = _sequence(
+        data.get("inventory_roots", []), f"{label}.inventory_roots"
+    )
+    inventory_roots: list[InventoryRootSpec] = []
+    for index, raw_inventory_root in enumerate(inventory_payload):
+        inventory_root = _mapping(
+            raw_inventory_root, f"{label}.inventory_roots[{index}]"
+        )
+        _require_keys(
+            inventory_root,
+            _INVENTORY_ROOT_KEYS,
+            f"{label}.inventory_roots[{index}]",
+        )
+        recursive = inventory_root["recursive"]
+        if type(recursive) is not bool:
+            raise ValueError(
+                f"{label}.inventory_roots[{index}].recursive must be boolean"
+            )
+        inventory_roots.append(
+            InventoryRootSpec(
+                path=normalize_relative_path(
+                    _nonempty_string(
+                        inventory_root["path"], "inventory root path"
+                    )
+                ),
+                kind=_nonempty_string(
+                    inventory_root["kind"], "inventory root kind"
+                ),
+                recursive=recursive,
+                include_globs=_string_tuple(
+                    inventory_root["include_globs"],
+                    f"{label}.inventory_roots[{index}].include_globs",
+                ),
+            )
+        )
     return AdapterScopeManifest(
         discovery_paths=discovery_paths,
         instruction_entrypoints=tuple(entrypoints),
         skill_locations=tuple(locations),
+        inventory_roots=tuple(inventory_roots),
     )
 
 
@@ -276,10 +330,14 @@ def _nonempty_string(value: object, label: str) -> str:
 
 
 def _require_keys(
-    payload: Mapping[str, object], expected: frozenset[str], label: str
+    payload: Mapping[str, object],
+    expected: frozenset[str],
+    label: str,
+    *,
+    allowed: frozenset[str] | None = None,
 ) -> None:
     actual = set(payload)
-    unknown = actual - expected
+    unknown = actual - (allowed or expected)
     if unknown:
         raise ValueError(
             f"unknown {label} fields: {', '.join(sorted(unknown))}"

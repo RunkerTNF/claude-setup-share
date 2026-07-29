@@ -1,0 +1,10 @@
+{
+  "effortLevel": "high",
+  "permissions": {
+    "allow": [
+      "Read",
+      "Glob",
+      "Grep"
+    ]
+  }
+}

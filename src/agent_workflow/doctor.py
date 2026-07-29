@@ -46,6 +46,7 @@ def run_doctor(
     _check_generated(root, manifest, diagnostics)
     _check_required_core(root, diagnostics)
     _lint_skills(root, diagnostics)
+    _check_transaction_journals(root, diagnostics)
     _scan_bootstrap_dependencies(root, manifest, diagnostics)
     _validate_selected_adapters(root, manifest, registry, diagnostics)
     return _ordered(diagnostics)
@@ -225,6 +226,77 @@ def _lint_skills(root: Path, diagnostics: list[Diagnostic]) -> None:
         for diagnostic in lint_skill(child):
             path = f"{_relative(child, root)}/{diagnostic.path}"
             diagnostics.append(Diagnostic(diagnostic.severity, diagnostic.code, path, diagnostic.message))
+
+
+def _check_transaction_journals(
+    root: Path,
+    diagnostics: list[Diagnostic],
+) -> None:
+    journals = root / "workflow" / "journals"
+    if not journals.exists():
+        return
+    if not _safe_directory(journals, root):
+        diagnostics.append(
+            _diagnostic(
+                "transaction.journals-unsafe",
+                "workflow/journals",
+                "transaction journal directory is unsafe",
+            )
+        )
+        return
+    from .transactions import TransactionJournal
+
+    try:
+        candidates = sorted(
+            journals.glob("*.json"),
+            key=lambda path: path.name.casefold(),
+        )
+    except OSError:
+        diagnostics.append(
+            _diagnostic(
+                "transaction.journals-unreadable",
+                "workflow/journals",
+                "transaction journal directory cannot be read",
+            )
+        )
+        return
+    for path in candidates:
+        relative = _relative(path, root)
+        if not _safe_file(path, root):
+            diagnostics.append(
+                _diagnostic(
+                    "transaction.journal-invalid",
+                    relative,
+                    "transaction journal is missing or unsafe",
+                )
+            )
+            continue
+        try:
+            journal = TransactionJournal.from_json(
+                path.read_text(encoding="utf-8")
+            )
+        except (OSError, UnicodeError, ValueError) as error:
+            diagnostics.append(
+                _diagnostic(
+                    "transaction.journal-invalid",
+                    relative,
+                    f"transaction journal is invalid: {error}",
+                )
+            )
+            continue
+        if journal.status in {
+            "prepared",
+            "committing",
+            "rolling_back",
+            "rollback_failed",
+        }:
+            diagnostics.append(
+                _diagnostic(
+                    "transaction.recovery-required",
+                    relative,
+                    "transaction requires recovery or rollback",
+                )
+            )
 
 
 def _scan_bootstrap_dependencies(

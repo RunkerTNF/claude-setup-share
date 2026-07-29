@@ -4,10 +4,19 @@ from pathlib import Path
 from typing import Mapping
 
 from agent_workflow.model import Scope
+from agent_workflow.migration.mappings import (
+    MappedNativeArtifact,
+    NativeMappingContext,
+)
+from agent_workflow.migration.model import ArtifactRecord
 
-from ..base import AdapterContext
+from ..base import AdapterContext, InventoryRoot
 from ..manifest import AdapterManifest
 from ..rendered import GeneratedEntrypointAdapter
+from .migration import (
+    claude_inventory_roots,
+    claude_map_native_artifact,
+)
 
 
 class ClaudeAdapter(GeneratedEntrypointAdapter):
@@ -42,6 +51,23 @@ class ClaudeAdapter(GeneratedEntrypointAdapter):
             "OVERLAY_IMPORT": overlay,
             "MEMORY_IMPORT": f"@{neutral}/memory/MEMORY.md",
         }
+
+    def inventory_roots(
+        self, context: AdapterContext
+    ) -> tuple[InventoryRoot, ...]:
+        return claude_inventory_roots(context, self.manifest)
+
+    def map_native_artifact(
+        self,
+        record: ArtifactRecord,
+        safe_content: object,
+        target_context: NativeMappingContext,
+    ) -> MappedNativeArtifact:
+        return claude_map_native_artifact(
+            record,
+            safe_content,
+            target_context,
+        )
 
 
 def create_adapter(

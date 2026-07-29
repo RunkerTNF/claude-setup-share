@@ -25,6 +25,91 @@
         "path": ".claude/skills",
         "mode": "wrapper"
       }
+    ],
+    "inventory_roots": [
+      {
+        "path": ".claude/CLAUDE.md",
+        "kind": "rules",
+        "recursive": false,
+        "include_globs": []
+      },
+      {
+        "path": ".claude/agents",
+        "kind": "subagent_prompt",
+        "recursive": true,
+        "include_globs": [
+          "*.md",
+          "**/*.md"
+        ]
+      },
+      {
+        "path": ".claude/commands",
+        "kind": "command",
+        "recursive": true,
+        "include_globs": [
+          "*.md",
+          "**/*.md"
+        ]
+      },
+      {
+        "path": ".claude/memory",
+        "kind": "manual_memory",
+        "recursive": true,
+        "include_globs": [
+          "*.md",
+          "**/*.md"
+        ]
+      },
+      {
+        "path": ".claude/projects",
+        "kind": "auto_memory",
+        "recursive": true,
+        "include_globs": [
+          "*.md",
+          "**/*.md"
+        ]
+      },
+      {
+        "path": ".claude/sessions",
+        "kind": "session",
+        "recursive": true,
+        "include_globs": [
+          "*.md",
+          "**/*.md"
+        ]
+      },
+      {
+        "path": ".claude/settings.json",
+        "kind": "settings",
+        "recursive": false,
+        "include_globs": []
+      },
+      {
+        "path": ".claude/settings.local.json",
+        "kind": "settings",
+        "recursive": false,
+        "include_globs": []
+      },
+      {
+        "path": ".claude/skills",
+        "kind": "skill",
+        "recursive": true,
+        "include_globs": [
+          "**/*"
+        ]
+      },
+      {
+        "path": ".claude/statusline.js",
+        "kind": "unknown",
+        "recursive": false,
+        "include_globs": []
+      },
+      {
+        "path": ".claude/workitems-rendering.md",
+        "kind": "unknown",
+        "recursive": false,
+        "include_globs": []
+      }
     ]
   },
   "project": {
@@ -53,6 +138,76 @@
       {
         "path": ".claude/skills",
         "mode": "wrapper"
+      }
+    ],
+    "inventory_roots": [
+      {
+        "path": ".claude/agents",
+        "kind": "subagent_prompt",
+        "recursive": true,
+        "include_globs": [
+          "*.md",
+          "**/*.md"
+        ]
+      },
+      {
+        "path": ".claude/commands",
+        "kind": "command",
+        "recursive": true,
+        "include_globs": [
+          "*.md",
+          "**/*.md"
+        ]
+      },
+      {
+        "path": ".claude/memory",
+        "kind": "manual_memory",
+        "recursive": true,
+        "include_globs": [
+          "*.md",
+          "**/*.md"
+        ]
+      },
+      {
+        "path": ".claude/sessions",
+        "kind": "session",
+        "recursive": true,
+        "include_globs": [
+          "*.md",
+          "**/*.md"
+        ]
+      },
+      {
+        "path": ".claude/settings.json",
+        "kind": "settings",
+        "recursive": false,
+        "include_globs": []
+      },
+      {
+        "path": ".claude/settings.local.json",
+        "kind": "settings",
+        "recursive": false,
+        "include_globs": []
+      },
+      {
+        "path": ".claude/skills",
+        "kind": "skill",
+        "recursive": true,
+        "include_globs": [
+          "**/*"
+        ]
+      },
+      {
+        "path": "CLAUDE.local.md",
+        "kind": "rules",
+        "recursive": false,
+        "include_globs": []
+      },
+      {
+        "path": "CLAUDE.md",
+        "kind": "rules",
+        "recursive": false,
+        "include_globs": []
       }
     ]
   },

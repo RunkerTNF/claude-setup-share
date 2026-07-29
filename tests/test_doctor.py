@@ -235,6 +235,23 @@ def test_doctor_lints_children_in_order_and_does_not_mutate_state(tmp_path: Path
     assert after == before
 
 
+def test_doctor_reports_invalid_transaction_journal(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / ".agents"
+    write_manifest(root, generated_files={})
+    write_core(root)
+    journal = root / "workflow" / "journals" / "broken.json"
+    journal.parent.mkdir(parents=True)
+    journal.write_text("{broken", encoding="utf-8")
+
+    diagnostics = run_doctor(root)
+
+    assert [item.code for item in diagnostics] == [
+        "transaction.journal-invalid"
+    ]
+
+
 def test_doctor_warns_when_selected_adapter_is_unavailable(
     tmp_path: Path,
 ) -> None:

@@ -13,6 +13,10 @@ _MAIN = (
     "from agent_workflow.cli import main\n\n"
     "raise SystemExit(main())\n"
 ).encode("utf-8")
+_BUNDLED_SKILLS = (
+    "agent-workflow-migrate",
+    "agent-workflow-setup",
+)
 
 
 def build_manager_zipapp(source_root: Path) -> bytes:
@@ -29,11 +33,12 @@ def build_manager_zipapp(source_root: Path) -> bytes:
         source_root / "templates",
         "agent_workflow/_bundled/templates",
     )
-    _add_tree(
-        files,
-        source_root / "skills" / "agent-workflow-setup",
-        "agent_workflow/_bundled/skills/agent-workflow-setup",
-    )
+    for skill_name in _BUNDLED_SKILLS:
+        _add_tree(
+            files,
+            source_root / "skills" / skill_name,
+            f"agent_workflow/_bundled/skills/{skill_name}",
+        )
 
     output = BytesIO()
     with zipfile.ZipFile(output, mode="w") as archive:
@@ -63,7 +68,10 @@ def _safe_source_root(source_root: Path) -> Path:
     required = (
         resolved / "src" / "agent_workflow",
         resolved / "templates",
-        resolved / "skills" / "agent-workflow-setup",
+        *(
+            resolved / "skills" / skill_name
+            for skill_name in _BUNDLED_SKILLS
+        ),
     )
     if any(
         not _safe_subdirectory(resolved, path)

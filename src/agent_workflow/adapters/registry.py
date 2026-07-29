@@ -44,6 +44,10 @@ class AdapterRegistry:
         )
 
     @classmethod
+    def builtins(cls) -> "AdapterRegistry":
+        return builtin_registry()
+
+    @classmethod
     def combine(
         cls, registries: Iterable["AdapterRegistry"]
     ) -> "AdapterRegistry":

@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "demo": {
+      "command": "demo-server",
+      "args": [
+        "--stdio"
+      ]
+    }
+  }
+}

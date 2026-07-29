@@ -1,12 +1,14 @@
 {
   "bootstrap_root": null,
   "generated_files": {
-    "neutral:RULES.md": "c1ff501e106257d956fc72172d90bd75e7b830d3655cba1651f91cabd3a33149",
-    "neutral:memory/MEMORY.md": "8c4f1fbee8471f84ef41df05b2926582df598ea8e8dc1d5b30a3e4c67a5a3a5a",
+    "neutral:RULES.md": "d2ae4f0c7c2e0359972b456f796c7c76cd1f097edf1d0517447738fe2834f814",
+    "neutral:memory/MEMORY.md": "026f95f4544092d38834af2c71b5e3cd8fcd1095b83e258d67c06b46147324fb",
+    "neutral:skills/agent-workflow-migrate/SKILL.md": "322459442e7946ff884a6a55d194b4def414648a7c847cd28cacb193587304ca",
+    "neutral:skills/agent-workflow-migrate/references/classification-contract.md": "9ed613e73d18e27c5a1c6d79bd3478233585dec2ccd9955bad2f5deb16d99f80",
     "neutral:skills/agent-workflow-setup/SKILL.md": "81434362729e6dd1d42faf42e529f5d212d3b09294e5f508cfb12886b8228ef3",
     "neutral:skills/agent-workflow-setup/references/flow.md": "9a0cb501b4d1a84f0e70feed8aa787b0122438701c15e65048b2c8c0b3138a0c",
-    "neutral:workflow/agent-workflow.pyz": "f69c5b840107911b437176208cde605093156c3a94d9e784e0689bba4423ea43",
-    "scope:.codex/AGENTS.md": "c99d5cce88a6749385b6d6a397aff8fdd19c9765f10812f220cb6fc92ab42b0d"
+    "neutral:workflow/agent-workflow.pyz": "719cef1c86da6a892bca0b5ef931aa240e07e2e3a191e86bf316a288ba55511c",
+    "scope:.codex/AGENTS.md": "519159fd4f050cd0bc798f2a5d5afbf205bc38c6692da6c132a0beb6b901463d"
   },
   "generator_version": "0.1.0",
   "profile": null,
