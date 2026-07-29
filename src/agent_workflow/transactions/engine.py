@@ -36,6 +36,7 @@ class _NamespaceClaim:
     journal_path: Path
     token: str
     payload: Mapping[str, object]
+    identity: tuple[int, int]
 
 
 def apply_plan(plan: TransactionPlan) -> TransactionJournal:
@@ -85,9 +86,12 @@ def apply_plan(plan: TransactionPlan) -> TransactionJournal:
         try:
             _verify_namespace_claim(claim)
             _, warnings = backup.create_backup(backup_root, sources)
+            _fsync_tree_directories(backup_root)
+            _fsync_directory(backup_root.parent)
             backup.verify_backup(backup_root, sources)
             stage_root = _create_stage_root(staging_parent, transaction_id, "apply")
             staged = _stage_writes(stage_root, resolved_operations)
+            _fsync_tree_directories(stage_root)
             _revalidate_complete_plan(plan, resolved_operations)
         except Exception as preparation_error:
             try:
@@ -339,6 +343,7 @@ def _create_stage_root(parent: Path, transaction_id: str, label: str) -> Path:
     if root.exists() or root.is_symlink():
         raise BackupError(f"staging location already exists or is unsafe: {root}")
     root.mkdir(parents=True)
+    _fsync_directory(root.parent)
     return root
 
 
@@ -371,21 +376,41 @@ def _claim_transaction_namespace(
         "entries": [entry.to_payload() for entry in entries],
     }
     claim_path = staging_root / "claim.json"
-    claim = _NamespaceClaim(staging_root, claim_path, journal_path, token, payload)
+    claim: _NamespaceClaim | None = None
     try:
         staging_root.mkdir()
-        _write_fsynced(claim_path, _claim_json(payload))
+        identity = _write_fsynced_identity(claim_path, _claim_json(payload))
+        claim = _NamespaceClaim(staging_root, claim_path, journal_path, token, payload, identity)
         _read_claim(claim_path)
-    except Exception:
+        _fsync_directory(staging_root)
+        _fsync_directory(staging_root.parent)
+    except Exception as original_error:
+        if claim is not None:
+            try:
+                _write_claim(claim, "prepare_failed")
+            except Exception as claim_error:
+                original_error.add_note(f"could not persist prepare_failed claim: {claim_error}")
         raise
+    assert claim is not None
     return claim
 
 
-def _verify_namespace_claim(claim: _NamespaceClaim, *, allow_apply: bool = False) -> None:
+def _verify_namespace_claim(
+    claim: _NamespaceClaim,
+    *,
+    allow_apply: bool = False,
+    allow_journal: bool = False,
+    expected_status: str = "preparing",
+) -> None:
+    stat = claim.claim_path.lstat()
+    if (stat.st_dev, stat.st_ino) != claim.identity:
+        raise BackupError("transaction namespace claim identity changed")
     payload = _read_claim(claim.claim_path)
-    if payload.get("token") != claim.token or payload.get("transaction_id") != claim.payload["transaction_id"]:
+    expected = dict(claim.payload)
+    expected["status"] = expected_status
+    if payload != expected:
         raise BackupError("transaction namespace ownership changed")
-    if claim.journal_path.exists() or claim.journal_path.is_symlink():
+    if not allow_journal and (claim.journal_path.exists() or claim.journal_path.is_symlink()):
         raise BackupError("transaction namespace journal was claimed by another writer")
     allowed = {claim.claim_path}
     if allow_apply:
@@ -433,13 +458,16 @@ def _read_claim(path: Path) -> dict[str, object]:
 
 
 def _write_claim(claim: _NamespaceClaim, status: str) -> None:
+    _verify_namespace_claim(claim, allow_apply=(claim.staging_root / "apply").exists())
     payload = dict(claim.payload)
     payload["status"] = status
-    temporary = claim.claim_path.with_name(f".{claim.claim_path.name}.{uuid4()}.tmp")
+    temporary = claim.staging_root.parent / f".{claim.staging_root.name}.claim.{uuid4()}.tmp"
     try:
         _write_fsynced(temporary, _claim_json(payload))
         _read_claim(temporary)
+        _verify_namespace_claim(claim, allow_apply=(claim.staging_root / "apply").exists())
         os.replace(temporary, claim.claim_path)
+        _fsync_directory(claim.staging_root)
     finally:
         temporary.unlink(missing_ok=True)
 
@@ -447,36 +475,91 @@ def _write_claim(claim: _NamespaceClaim, status: str) -> None:
 def _publish_initial_journal(journal: TransactionJournal, claim: _NamespaceClaim) -> None:
     _verify_namespace_claim(claim, allow_apply=True)
     output = None
-    identity: tuple[int, int] | None = None
+    journal_identity: tuple[int, int] | None = None
     try:
         output = claim.journal_path.open("xb")
         stat = os.fstat(output.fileno())
-        identity = stat.st_dev, stat.st_ino
+        journal_identity = stat.st_dev, stat.st_ino
         output.write(journal.to_json().encode("utf-8"))
         _sync_initial_journal(output)
-        output.close()
+        synced = os.fstat(output.fileno())
+        if journal_identity != (synced.st_dev, synced.st_ino):
+            raise BackupError("published journal handle identity changed")
+        _close_initial_journal(output)
         output = None
-        restored = TransactionJournal.from_json(claim.journal_path.read_text(encoding="utf-8"))
-        if restored.status != "prepared" or restored.transaction_id != journal.transaction_id:
+        _fsync_directory(claim.journal_path.parent)
+        _after_initial_journal_sync(claim.journal_path)
+        current = claim.journal_path.lstat()
+        if journal_identity != (current.st_dev, current.st_ino):
+            raise BackupError("published journal identity changed")
+        with claim.journal_path.open("rb") as published:
+            opened = os.fstat(published.fileno())
+            if journal_identity != (opened.st_dev, opened.st_ino):
+                raise BackupError("published journal identity changed")
+            raw_journal = published.read()
+            read = os.fstat(published.fileno())
+            if journal_identity != (read.st_dev, read.st_ino):
+                raise BackupError("published journal identity changed")
+        final = claim.journal_path.lstat()
+        if journal_identity != (final.st_dev, final.st_ino):
+            raise BackupError("published journal identity changed")
+        restored = TransactionJournal.from_json(raw_journal.decode("utf-8"))
+        if restored.to_json() != journal.to_json():
             raise BackupError("published journal validation failed")
-        claim.claim_path.unlink(missing_ok=True)
+        _verify_namespace_claim(claim, allow_apply=True, allow_journal=True)
+        claim.claim_path.unlink()
+        _fsync_directory(claim.staging_root)
     except FileExistsError as error:
         raise BackupError(f"transaction namespace already exists: {claim.journal_path}") from error
-    except Exception:
+    except Exception as original_error:
         if output is not None:
-            output.close()
+            try:
+                _close_initial_journal(output)
+            except Exception as close_error:
+                original_error.add_note(f"initial journal close failed: {close_error}")
         try:
             stat = claim.journal_path.lstat()
-            if identity == (stat.st_dev, stat.st_ino):
+            if journal_identity == (stat.st_dev, stat.st_ino):
                 claim.journal_path.unlink()
-        except OSError:
-            pass
+                _fsync_directory(claim.journal_path.parent)
+        except Exception as cleanup_error:
+            original_error.add_note(f"initial journal cleanup failed: {cleanup_error}")
         raise
 
 
 def _sync_initial_journal(output: object) -> None:
     output.flush()
     os.fsync(output.fileno())
+
+
+def _close_initial_journal(output: object) -> None:
+    output.close()
+
+
+def _after_initial_journal_sync(_journal_path: Path) -> None:
+    """Test seam for a writer racing after durable journal output closes."""
+
+
+def _fsync_directory(path: Path) -> None:
+    """Flush directory entries on POSIX.
+
+    Python's Windows stdlib cannot open and fsync directory handles, so Windows
+    retains fsynced file contents but directory-entry durability is best effort.
+    """
+    if os.name == "nt":
+        return
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+    descriptor = os.open(path, flags)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def _fsync_tree_directories(root: Path) -> None:
+    directories = [root, *(path for path in root.rglob("*") if path.is_dir())]
+    for directory in sorted(directories, key=lambda item: len(item.parts), reverse=True):
+        _fsync_directory(directory)
 
 
 def _stage_writes(stage_root: Path, operations: Iterable[_ResolvedOperation]) -> dict[tuple[str, str], Path]:
@@ -599,6 +682,7 @@ def _write_journal(journal: TransactionJournal) -> None:
     temporary = path.with_name(f".{path.name}.{uuid4()}.tmp")
     _write_fsynced(temporary, journal.to_json().encode("utf-8"))
     os.replace(temporary, path)
+    _fsync_directory(path.parent)
 
 
 def _write_fsynced(path: Path, payload: bytes) -> None:
@@ -606,3 +690,12 @@ def _write_fsynced(path: Path, payload: bytes) -> None:
         output.write(payload)
         output.flush()
         os.fsync(output.fileno())
+
+
+def _write_fsynced_identity(path: Path, payload: bytes) -> tuple[int, int]:
+    with path.open("xb") as output:
+        stat = os.fstat(output.fileno())
+        output.write(payload)
+        output.flush()
+        os.fsync(output.fileno())
+    return stat.st_dev, stat.st_ino

@@ -588,3 +588,147 @@ def test_prepublication_failure_preserves_original_error_backup_and_strict_claim
     assert claim["status"] == "prepare_failed" and len(claim["entries"]) == 1
     backup_dirs = list((root / "workflow" / "backups").iterdir())
     assert backup_dirs and (backup_dirs[0] / "inventory.json").exists()
+
+
+def test_foreign_replacement_claim_with_same_ids_is_never_overwritten(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    root = tmp_path / ".agents"; root.mkdir(); target = root / "RULES.md"; target.write_bytes(b"before")
+    from agent_workflow.transactions import backup as backup_module
+    real_create = backup_module.create_backup
+    foreign_raw: bytes | None = None
+    def replace_claim_then_fail(*args: object, **kwargs: object) -> object:
+        nonlocal foreign_raw
+        result = real_create(*args, **kwargs)
+        claim_path = next((root / "workflow" / "staging").rglob("claim.json"))
+        payload = json.loads(claim_path.read_text())
+        payload["target_roots"]["neutral"] = str(tmp_path / "foreign")
+        payload["entries"][0]["path"] = "foreign"
+        foreign_raw = json.dumps(payload, sort_keys=True).encode()
+        claim_path.unlink(); claim_path.write_bytes(foreign_raw)
+        raise OSError("backup phase failed")
+    monkeypatch.setattr(backup_module, "create_backup", replace_claim_then_fail)
+    with pytest.raises(OSError, match="backup phase failed") as error:
+        apply_plan(make_plan(root, sha256_file(target)))
+    claim_path = next((root / "workflow" / "staging").rglob("claim.json"))
+    assert claim_path.read_bytes() == foreign_raw
+    assert any("prepare_failed" in note for note in error.value.__notes__)
+
+
+def test_substituted_prepared_journal_and_claim_survive_handoff(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    root = tmp_path / ".agents"; root.mkdir(); target = root / "RULES.md"; target.write_bytes(b"before")
+    from agent_workflow.transactions import engine
+    foreign_journal: bytes | None = None
+    def substitute(journal_path: Path) -> None:
+        nonlocal foreign_journal
+        payload = json.loads(journal_path.read_text()); payload["target_roots"]["neutral"] = str(tmp_path / "foreign")
+        foreign_journal = json.dumps(payload, sort_keys=True).encode()
+        journal_path.unlink(); journal_path.write_bytes(foreign_journal)
+    monkeypatch.setattr(engine, "_after_initial_journal_sync", substitute, raising=False)
+    with pytest.raises(BackupError):
+        apply_plan(make_plan(root, sha256_file(target)))
+    journal_path = next((root / "workflow" / "journals").glob("*.json"))
+    assert journal_path.read_bytes() == foreign_journal
+    assert next((root / "workflow" / "staging").rglob("claim.json")).exists()
+    assert target.read_bytes() == b"before"
+
+
+@pytest.mark.parametrize("phase", ("backup", "stage"))
+def test_genuine_partial_preparation_retains_bytes_and_failed_claim(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, phase: str) -> None:
+    root = tmp_path / ".agents"; root.mkdir()
+    first, second = root / "first", root / "second"; first.write_bytes(b"first"); second.write_bytes(b"second")
+    plan = TransactionPlan.new(scope_root=str(root), target_roots={"neutral": str(root), "scope": str(tmp_path)}, allowed_roots=(str(tmp_path),), operations=(
+        WriteOperation.from_bytes("neutral", "first", b"FIRST", sha256_file(first), Ownership.CANONICAL),
+        WriteOperation.from_bytes("neutral", "second", b"SECOND", sha256_file(second), Ownership.CANONICAL),
+    ))
+    from agent_workflow.transactions import engine, backup as backup_module
+    if phase == "backup":
+        real_write = backup_module._write_fsynced; count = 0
+        def fail_second(path: Path, payload: bytes) -> None:
+            nonlocal count
+            if "files" in path.parts:
+                count += 1
+                if count == 2: raise OSError("partial backup failure")
+            real_write(path, payload)
+        monkeypatch.setattr(backup_module, "_write_fsynced", fail_second)
+    else:
+        real_write = engine._write_fsynced; count = 0
+        def fail_second(path: Path, payload: bytes) -> None:
+            nonlocal count
+            if "apply" in path.parts:
+                count += 1
+                if count == 2: raise OSError("partial stage failure")
+            real_write(path, payload)
+        monkeypatch.setattr(engine, "_write_fsynced", fail_second)
+    error_type = BackupError if phase == "backup" else OSError
+    with pytest.raises(error_type, match=f"partial {phase} failure"):
+        apply_plan(plan)
+    claim_path = next((root / "workflow" / "staging").rglob("claim.json"))
+    claim = engine._read_claim(claim_path)
+    assert claim["status"] == "prepare_failed"
+    assert first.read_bytes() == b"first" and second.read_bytes() == b"second"
+    backup_root = next((root / "workflow" / "backups").iterdir())
+    assert (backup_root / "files" / "neutral" / "first").read_bytes() == b"first"
+    if phase == "stage":
+        assert (claim_path.parent / "apply" / "neutral" / "first").read_bytes() == b"FIRST"
+
+
+@pytest.mark.parametrize("phase", ("backup_parent", "journal_parent"))
+def test_directory_fsync_failure_preserves_claim_backup_and_target(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    phase: str,
+) -> None:
+    root = tmp_path / ".agents"
+    root.mkdir()
+    target = root / "RULES.md"
+    target.write_bytes(b"before")
+    from agent_workflow.transactions import engine
+
+    failing_path = root / "workflow" / ("backups" if phase == "backup_parent" else "journals")
+    failed = False
+
+    def fail_once(path: Path) -> None:
+        nonlocal failed
+        if path == failing_path and not failed:
+            failed = True
+            raise OSError("directory fsync failure")
+
+    monkeypatch.setattr(engine, "_fsync_directory", fail_once, raising=False)
+    with pytest.raises(OSError, match="directory fsync failure"):
+        apply_plan(make_plan(root, sha256_file(target)))
+
+    assert target.read_bytes() == b"before"
+    claim_path = next((root / "workflow" / "staging").rglob("claim.json"))
+    assert engine._read_claim(claim_path)["status"] == "prepare_failed"
+    backup_root = next((root / "workflow" / "backups").iterdir())
+    assert (backup_root / "files" / "neutral" / "RULES.md").read_bytes() == b"before"
+
+
+def test_initial_journal_close_cleanup_failure_keeps_publish_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / ".agents"
+    root.mkdir()
+    target = root / "RULES.md"
+    target.write_bytes(b"before")
+    from agent_workflow.transactions import engine
+
+    def fail_sync(_output: object) -> None:
+        raise OSError("journal sync failed")
+
+    def close_then_fail(output: object) -> None:
+        output.close()
+        raise OSError("journal close cleanup failed")
+
+    monkeypatch.setattr(engine, "_sync_initial_journal", fail_sync)
+    monkeypatch.setattr(engine, "_close_initial_journal", close_then_fail, raising=False)
+
+    with pytest.raises(OSError, match="journal sync failed") as error:
+        apply_plan(make_plan(root, sha256_file(target)))
+
+    assert any("journal close cleanup failed" in note for note in error.value.__notes__)
+    claim_path = next((root / "workflow" / "staging").rglob("claim.json"))
+    assert engine._read_claim(claim_path)["status"] == "prepare_failed"
+    backup_root = next((root / "workflow" / "backups").iterdir())
+    assert (backup_root / "files" / "neutral" / "RULES.md").read_bytes() == b"before"
+    assert target.read_bytes() == b"before"
