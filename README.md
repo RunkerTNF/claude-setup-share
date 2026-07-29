@@ -4,6 +4,19 @@
 
 Гайд построен как «сверху вниз»: сначала базовые вещи, которые полезны всегда, потом тонкости, которые выстрелят через пару недель работы.
 
+## Универсальный workflow для агентных LLM
+
+Новый setup не привязан к каталогу конкретного инструмента: общие правила,
+память, sessions и portable skills хранятся в `.agents/`. Гарантированные
+адаптеры для Claude Code и Codex создают только нативные entrypoints и
+wrapper'ы, а затем ссылаются на это единое ядро.
+
+Начните с [SETUP.md](SETUP.md). Репозиторий используется как одноразовый
+bootstrap: после глобальной установки остаются автономный Python-manager и
+skill `agent-workflow-setup`, поэтому checkout больше не нужен для настройки
+проектов. Старые Claude-only материалы ниже сохранены как исходный
+практический гайд и как вход для будущей миграции.
+
 ---
 
 ## 1. Глобальный `CLAUDE.md` в `~/.claude/`
@@ -336,10 +349,14 @@ The Markdown files under `templates/core/` are canonical. Wheel copies under
 `src/agent_workflow/_bundled/templates/core/` must remain byte-for-byte mirrors;
 the test suite rejects drift and verifies the installed, non-editable wheel.
 
-## Foundation CLI
+## Workflow CLI
 
-The current foundation provides five commands: `scan`, `plan init`, `apply`,
-`doctor`, and `rollback`. Create and inspect a plan before applying it; every
-apply is journaled and can be rolled back with its journal path. This is the
-foundation slice for the neutral workflow manager, not the final setup or
-migration user experience.
+The manager provides `scan --agents`, `plan init`, `plan setup`, `apply`,
+`doctor`, and `rollback`. Setup is always previewable, uses no network, refuses
+unmanaged native entrypoints, and requires explicit trust before loading
+Python from an external adapter. Every apply is journaled and can be rolled
+back with its journal path.
+
+Exact Claude Code and Codex output is locked by cross-platform golden tests.
+Release-time checks that require a real agent session are documented in
+[docs/live-smoke.md](docs/live-smoke.md).

@@ -1,0 +1,5 @@
+# BEGIN agent-workflow
+.agents/
+AGENTS.override.md
+CLAUDE.local.md
+# END agent-workflow

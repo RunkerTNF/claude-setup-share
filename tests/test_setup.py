@@ -70,6 +70,7 @@ def test_global_setup_composes_core_manager_skill_and_targets(
     )
     manifest = json.loads(manifest_operation.content_bytes())
     assert manifest["targets"] == ["claude", "codex"]
+    assert manifest["bootstrap_root"] is None
     assert "scope:.claude/CLAUDE.md" in manifest["generated_files"]
     assert "scope:.codex/AGENTS.md" in manifest["generated_files"]
 

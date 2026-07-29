@@ -8,6 +8,7 @@ import zipfile
 
 
 _TIMESTAMP = (1980, 1, 1, 0, 0, 0)
+_TEXT_SUFFIXES = frozenset({".json", ".md", ".py", ".toml", ".txt"})
 _MAIN = (
     "from agent_workflow.cli import main\n\n"
     "raise SystemExit(main())\n"
@@ -100,7 +101,7 @@ def _add_tree(
         if not entry.is_file():
             raise ValueError(f"package resource is unsafe: {entry}")
         name = f"{archive_prefix}/{relative.as_posix()}"
-        content = entry.read_bytes()
+        content = _packaged_content(entry)
         previous = files.get(name)
         if previous is not None and previous != content:
             raise ValueError(f"package resource collision: {name}")
@@ -118,3 +119,14 @@ def _safe_subdirectory(root: Path, path: Path) -> bool:
         if current.is_symlink() or not current.is_dir():
             return False
     return True
+
+
+def _packaged_content(path: Path) -> bytes:
+    content = path.read_bytes()
+    if path.suffix.casefold() not in _TEXT_SUFFIXES:
+        return content
+    try:
+        text = content.decode("utf-8")
+    except UnicodeDecodeError as error:
+        raise ValueError(f"text package resource is not UTF-8: {path}") from error
+    return text.replace("\r\n", "\n").replace("\r", "\n").encode("utf-8")

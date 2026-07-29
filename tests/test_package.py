@@ -37,6 +37,7 @@ def test_built_zipapp_runs_without_source_tree(tmp_path: Path) -> None:
         assert {entry.date_time for entry in package.infolist()} == {
             (1980, 1, 1, 0, 0, 0)
         }
+        assert b"\r\n" not in package.read("agent_workflow/setup.py")
 
 
 def test_zipapp_rejects_missing_or_symlinked_source(tmp_path: Path) -> None:

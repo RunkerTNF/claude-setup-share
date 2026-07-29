@@ -6,6 +6,9 @@ from pathlib import Path
 from .model import normalize_relative_path
 
 
+_TEXT_SUFFIXES = frozenset({".json", ".md", ".toml", ".txt"})
+
+
 def load_bundled_resource(relative_path: str) -> bytes:
     """Load a package resource, falling back to a validated source checkout."""
     content, _ = _load_resource(relative_path)
@@ -39,10 +42,10 @@ def _load_resource(relative_path: str) -> tuple[bytes, Path | None]:
         canonical_content = candidate.read_bytes()
         if bundled_content is not None and bundled_content != canonical_content:
             raise ValueError(f"bundled resource differs from canonical source: {normalized}")
-        return canonical_content, checkout_root
+        return _normalized_content(normalized, canonical_content), checkout_root
 
     if bundled_content is not None:
-        return bundled_content, None
+        return _normalized_content(normalized, bundled_content), None
     raise FileNotFoundError(
         f"no bundled resource and no valid source checkout fallback: {normalized}"
     )
@@ -70,3 +73,15 @@ def _validate_filesystem_containment(root: object, candidate: object, label: str
         candidate.resolve(strict=False).relative_to(root.resolve(strict=False))
     except ValueError as error:
         raise ValueError(f"resource path escapes {label}") from error
+
+
+def _normalized_content(relative_path: str, content: bytes) -> bytes:
+    if Path(relative_path).suffix.casefold() not in _TEXT_SUFFIXES:
+        return content
+    try:
+        text = content.decode("utf-8")
+    except UnicodeDecodeError as error:
+        raise ValueError(
+            f"text resource is not UTF-8: {relative_path}"
+        ) from error
+    return text.replace("\r\n", "\n").replace("\r", "\n").encode("utf-8")

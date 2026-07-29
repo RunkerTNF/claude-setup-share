@@ -11,7 +11,7 @@ from .adapters.base import AdapterContext, AdapterDetection, AgentAdapter
 from .adapters.manifest import AdapterManifest
 from .adapters.registry import AdapterRegistry, builtin_registry
 from .adapters.rendered import safe_current_hash
-from .hashing import sha256_bytes
+from .hashing import sha256_bytes, sha256_runtime_normalized
 from .layout import plan_neutral_init
 from .manifest import WorkflowManifest
 from .model import Ownership, ProjectProfile, Scope
@@ -173,6 +173,8 @@ def build_setup_plan(request: SetupRequest) -> TransactionPlan:
         conflict = _generated_conflict(
             operation,
             existing_manifest,
+            request,
+            target_roots,
         )
         if conflict is not None:
             conflicts.append(conflict)
@@ -180,8 +182,14 @@ def build_setup_plan(request: SetupRequest) -> TransactionPlan:
 
     if not conflicts:
         generated_files = {
-            f"{operation.root_id}:{operation.path}": sha256_bytes(
-                operation.content_bytes()
+            f"{operation.root_id}:{operation.path}": sha256_runtime_normalized(
+                operation.content_bytes(),
+                home=(
+                    request.home
+                    if request.scope is Scope.GLOBAL
+                    else None
+                ),
+                project=request.project_root,
             )
             for key, operation in sorted(operations.items())
             if key not in _PROFILE_FILES
@@ -193,7 +201,7 @@ def build_setup_plan(request: SetupRequest) -> TransactionPlan:
             profile=request.profile,
             targets=request.targets,
             generated_files=generated_files,
-            bootstrap_root=str(request.source_root),
+            bootstrap_root=None,
         )
         manifest_path = target_roots["neutral"] / "manifest.json"
         _add_operation(
@@ -384,13 +392,31 @@ def _read_manifest(root: Path) -> WorkflowManifest | None:
 def _generated_conflict(
     operation: WriteOperation,
     manifest: WorkflowManifest | None,
+    request: SetupRequest,
+    target_roots: dict[str, Path],
 ) -> str | None:
     if operation.expected_sha256 is None:
         return None
     key = f"{operation.root_id}:{operation.path}"
+    root = target_roots[operation.root_id]
+    target = root.joinpath(*operation.path.split("/"))
+    try:
+        current = target.read_bytes()
+    except OSError as error:
+        raise ValueError(
+            f"cannot read existing generated output: {key}"
+        ) from error
+    current_digests = {
+        sha256_bytes(current),
+        sha256_runtime_normalized(
+            current,
+            home=request.home if request.scope is Scope.GLOBAL else None,
+            project=request.project_root,
+        ),
+    }
     if (
         manifest is not None
-        and manifest.generated_files.get(key) == operation.expected_sha256
+        and manifest.generated_files.get(key) in current_digests
     ):
         return None
     return f"unmanaged generated output: {key}"

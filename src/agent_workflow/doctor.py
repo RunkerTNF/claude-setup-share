@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import hashlib
 import os
 from pathlib import Path
 
+from .hashing import sha256_bytes, sha256_runtime_normalized
 from .manifest import WorkflowManifest
 from .model import Severity, normalize_relative_path
 
@@ -172,11 +172,27 @@ def _check_generated(root: Path, manifest: WorkflowManifest, diagnostics: list[D
             diagnostics.append(_diagnostic(code, key, "missing or unsafe managed file"))
             continue
         try:
-            actual_digest = _sha256_regular_file(target)
+            content = target.read_bytes()
+            actual_digests = {
+                sha256_bytes(content),
+                sha256_runtime_normalized(
+                    content,
+                    home=(
+                        root.parent
+                        if manifest.scope.value == "global"
+                        else None
+                    ),
+                    project=(
+                        root.parent
+                        if manifest.scope.value == "project"
+                        else None
+                    ),
+                ),
+            }
         except OSError:
             diagnostics.append(_diagnostic("generated.path", key, "cannot read managed file safely"))
             continue
-        if actual_digest != expected_digest:
+        if expected_digest not in actual_digests:
             diagnostics.append(_diagnostic("generated.drift", key, "managed file hash differs from manifest"))
 
 
@@ -321,14 +337,6 @@ def _has_symlink_component(path: Path, root: Path) -> bool:
         if cursor.is_symlink():
             return True
     return False
-
-
-def _sha256_regular_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as file:
-        for chunk in iter(lambda: file.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
 
 
 def _normalize_for_scan(value: str) -> str:

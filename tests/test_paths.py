@@ -2,7 +2,11 @@ from pathlib import Path
 
 import pytest
 
-from agent_workflow.hashing import sha256_bytes, sha256_file
+from agent_workflow.hashing import (
+    sha256_bytes,
+    sha256_file,
+    sha256_runtime_normalized,
+)
 from agent_workflow.paths import HostPaths, resolve_write_target
 
 
@@ -130,3 +134,16 @@ def test_hashing_returns_lowercase_digest_and_missing_file_is_none(tmp_path: Pat
     assert sha256_bytes(b"hello world") == "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"
     assert sha256_file(file_path) == "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"
     assert sha256_file(tmp_path / "missing.bin") is None
+
+
+def test_runtime_normalized_hash_is_independent_of_home_path() -> None:
+    first = sha256_runtime_normalized(
+        b"read C:/Users/one/.agents/RULES.md\n",
+        home=Path("C:/Users/one"),
+    )
+    second = sha256_runtime_normalized(
+        b"read D:/home/two/.agents/RULES.md\n",
+        home=Path("D:/home/two"),
+    )
+
+    assert first == second
