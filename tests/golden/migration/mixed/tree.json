@@ -5,9 +5,9 @@
     "text": "# Agent Workflow Rules\n\nThis file is the neutral, global source of truth for workflow rules shared by configured agents.\n\nBefore the first response or action, read every Markdown file under `rules/`\nbeside this file in lexical order. Then read\n`overlays/<current-agent>/RULES.md` when it exists.\n"
   },
   "manifest.json": {
-    "sha256": "da388d9a52b9c1db13a22037a97770fd1a1356f4072ec452670061152c06dbfc",
-    "size_bytes": 374,
-    "text": "{\n  \"bootstrap_root\": \"<bootstrap-root>\",\n  \"generated_files\": {\n    \"neutral:RULES.md\": \"d2ae4f0c7c2e0359972b456f796c7c76cd1f097edf1d0517447738fe2834f814\",\n    \"neutral:memory/MEMORY.md\": \"026f95f4544092d38834af2c71b5e3cd8fcd1095b83e258d67c06b46147324fb\"\n  },\n  \"generator_version\": \"0.1.0\",\n  \"profile\": null,\n  \"schema_version\": 1,\n  \"scope\": \"global\",\n  \"targets\": []\n}\n"
+    "sha256": "b38e7d819b53f0ce16dd86d9e2e8b8d69b6055a7313715c21370ffa098f03385",
+    "size_bytes": 360,
+    "text": "{\n  \"bootstrap_root\": null,\n  \"generated_files\": {\n    \"neutral:RULES.md\": \"d2ae4f0c7c2e0359972b456f796c7c76cd1f097edf1d0517447738fe2834f814\",\n    \"neutral:memory/MEMORY.md\": \"026f95f4544092d38834af2c71b5e3cd8fcd1095b83e258d67c06b46147324fb\"\n  },\n  \"generator_version\": \"0.1.0\",\n  \"profile\": null,\n  \"schema_version\": 1,\n  \"scope\": \"global\",\n  \"targets\": []\n}\n"
   },
   "memory/IMPORTED.md": {
     "sha256": "ff64693c68787310dd51afa9d9baacf48cb60cf349d7567b2bb156aa237ef78a",

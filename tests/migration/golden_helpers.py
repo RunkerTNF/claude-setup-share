@@ -207,8 +207,7 @@ def _portable_snapshot_content(
     if relative.as_posix() != "manifest.json":
         return content
     payload = json.loads(content.decode("utf-8"))
-    if payload.get("bootstrap_root") is not None:
-        payload["bootstrap_root"] = "<bootstrap-root>"
+    payload["bootstrap_root"] = None
     return (
         json.dumps(payload, indent=2, sort_keys=True) + "\n"
     ).encode("utf-8")

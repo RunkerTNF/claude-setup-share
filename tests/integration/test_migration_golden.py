@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -11,6 +12,7 @@ from tests.migration.golden_helpers import (
     golden_json,
     golden_text,
     run_fixture_migration,
+    tree_snapshot,
     update_golden,
 )
 
@@ -53,6 +55,38 @@ def test_imported_rules_and_memory_are_discoverable(
     ]["text"]
     imported_index = result.tree["memory/IMPORTED.md"]["text"]
     assert "memory/preferences-from-claude.md" in imported_index
+
+
+def test_tree_snapshot_ignores_runtime_bootstrap_source(
+    tmp_path: Path,
+) -> None:
+    snapshots = []
+    for name, bootstrap_root in (
+        ("source", str(tmp_path / "checkout")),
+        ("wheel", None),
+    ):
+        root = tmp_path / name
+        root.mkdir()
+        (root / "manifest.json").write_text(
+            json.dumps(
+                {
+                    "bootstrap_root": bootstrap_root,
+                    "generated_files": {},
+                    "generator_version": "0.1.0",
+                    "profile": None,
+                    "schema_version": 1,
+                    "scope": "global",
+                    "targets": [],
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        snapshots.append(tree_snapshot(root))
+
+    assert snapshots[0] == snapshots[1]
 
 
 def test_current_repository_fixture_keeps_full_legacy_shape() -> None:
