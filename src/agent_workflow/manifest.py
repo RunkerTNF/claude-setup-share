@@ -15,6 +15,7 @@ _MANIFEST_KEYS = frozenset(
         "scope",
         "profile",
         "targets",
+        "excluded_skills",
         "generated_files",
         "bootstrap_root",
     }
@@ -29,10 +30,18 @@ class WorkflowManifest:
     profile: ProjectProfile | None
     targets: tuple[str, ...]
     generated_files: Mapping[str, str]
+    excluded_skills: tuple[str, ...] = ()
     bootstrap_root: str | None = None
 
     def __post_init__(self) -> None:
+        if not isinstance(self.excluded_skills, tuple):
+            raise ValueError("excluded_skills must be a tuple")
         object.__setattr__(self, "targets", tuple(self.targets))
+        object.__setattr__(
+            self,
+            "excluded_skills",
+            tuple(sorted(set(self.excluded_skills))),
+        )
         object.__setattr__(self, "generated_files", MappingProxyType(dict(self.generated_files)))
 
     def validate(self) -> None:
@@ -52,6 +61,13 @@ class WorkflowManifest:
             raise ValueError("bootstrap_root must be a string or null")
         if any(not isinstance(target, str) or not target for target in self.targets):
             raise ValueError("targets must contain non-empty strings")
+        if any(
+            not isinstance(skill, str) or not skill
+            for skill in self.excluded_skills
+        ):
+            raise ValueError(
+                "excluded_skills must contain non-empty strings"
+            )
 
         normalized_keys: set[str] = set()
         for key, digest in self.generated_files.items():
@@ -74,6 +90,7 @@ class WorkflowManifest:
             "scope": self.scope.value,
             "profile": self.profile.value if self.profile is not None else None,
             "targets": list(self.targets),
+            "excluded_skills": list(self.excluded_skills),
             "generated_files": dict(self.generated_files),
             "bootstrap_root": self.bootstrap_root,
         }
@@ -88,12 +105,18 @@ class WorkflowManifest:
         if not isinstance(payload, dict):
             raise ValueError("manifest JSON must be an object")
         unknown = set(payload) - _MANIFEST_KEYS
-        missing = (_MANIFEST_KEYS - {"bootstrap_root"}) - set(payload)
+        missing = (
+            _MANIFEST_KEYS - {"bootstrap_root", "excluded_skills"}
+        ) - set(payload)
         if unknown:
             raise ValueError(f"unknown manifest keys: {sorted(unknown)}")
         if missing:
             raise ValueError(f"missing manifest keys: {sorted(missing)}")
-        if not isinstance(payload["targets"], list) or not isinstance(payload["generated_files"], dict):
+        if (
+            not isinstance(payload["targets"], list)
+            or not isinstance(payload.get("excluded_skills", []), list)
+            or not isinstance(payload["generated_files"], dict)
+        ):
             raise ValueError("manifest collections must have the expected JSON types")
         try:
             result = cls(
@@ -102,6 +125,7 @@ class WorkflowManifest:
                 scope=Scope(payload["scope"]),
                 profile=ProjectProfile(payload["profile"]) if payload["profile"] is not None else None,
                 targets=tuple(payload["targets"]),
+                excluded_skills=tuple(payload.get("excluded_skills", [])),
                 generated_files=payload["generated_files"],
                 bootstrap_root=payload.get("bootstrap_root"),
             )

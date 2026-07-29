@@ -67,3 +67,16 @@ def test_manifest_copies_generated_files_and_serializes_bootstrap_root() -> None
     with pytest.raises(TypeError):
         manifest.generated_files["scope:other.md"] = "d" * 64
     assert json.loads(manifest.to_json())["bootstrap_root"] == ".agents"
+
+
+def test_manifest_rejects_non_tuple_excluded_skills() -> None:
+    with pytest.raises(ValueError, match="excluded_skills must be a tuple"):
+        WorkflowManifest(
+            schema_version=1,
+            generator_version="0.1.0",
+            scope=Scope.GLOBAL,
+            profile=None,
+            targets=(),
+            generated_files={},
+            excluded_skills="morning",
+        )

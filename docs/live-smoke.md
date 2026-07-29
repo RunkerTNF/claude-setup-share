@@ -1,5 +1,8 @@
 # Live smoke: Claude Code and Codex
 
+The release-blocking checklist and result table now live in
+[release.md](release.md). This file remains the detailed per-agent walkthrough.
+
 Run these checks before a release after all automated tests pass. Use a fresh
 temporary home and temporary Git project for each agent. Do not reuse a
 developer's real configuration.

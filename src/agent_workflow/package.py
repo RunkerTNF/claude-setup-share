@@ -8,14 +8,28 @@ import zipfile
 
 
 _TIMESTAMP = (1980, 1, 1, 0, 0, 0)
-_TEXT_SUFFIXES = frozenset({".json", ".md", ".py", ".toml", ".txt"})
+_TEXT_SUFFIXES = frozenset(
+    {".js", ".json", ".md", ".py", ".toml", ".txt"}
+)
 _MAIN = (
     "from agent_workflow.cli import main\n\n"
     "raise SystemExit(main())\n"
 ).encode("utf-8")
-_BUNDLED_SKILLS = (
+BUNDLED_SKILLS = (
     "agent-workflow-migrate",
     "agent-workflow-setup",
+    "backlog",
+    "code-review",
+    "feedback",
+    "morning",
+    "my-reviews",
+    "pick",
+    "plan-review",
+    "tasks",
+    "wrap",
+)
+MANAGEMENT_SKILLS = frozenset(
+    {"agent-workflow-migrate", "agent-workflow-setup"}
 )
 
 
@@ -30,10 +44,10 @@ def build_manager_zipapp(source_root: Path) -> bytes:
     )
     _add_tree(
         files,
-        source_root / "templates",
-        "agent_workflow/_bundled/templates",
+        source_root / "templates" / "core",
+        "agent_workflow/_bundled/templates/core",
     )
-    for skill_name in _BUNDLED_SKILLS:
+    for skill_name in BUNDLED_SKILLS:
         _add_tree(
             files,
             source_root / "skills" / skill_name,
@@ -67,10 +81,10 @@ def _safe_source_root(source_root: Path) -> Path:
         ) from error
     required = (
         resolved / "src" / "agent_workflow",
-        resolved / "templates",
+        resolved / "templates" / "core",
         *(
             resolved / "skills" / skill_name
-            for skill_name in _BUNDLED_SKILLS
+            for skill_name in BUNDLED_SKILLS
         ),
     )
     if any(

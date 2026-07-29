@@ -1,11 +1,15 @@
-name: ci
+name: release-check
 
 on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
-  test:
+  release-check:
+    name: ${{ matrix.os }} / Python ${{ matrix.python }}
     strategy:
       fail-fast: false
       matrix:
@@ -17,9 +21,23 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
-      - run: python -m pip install "setuptools>=75" "pytest>=8.3"
-      - run: python -m pip wheel --no-build-isolation --no-deps --wheel-dir dist .
-      - run: python -m pip install --no-index --no-deps --force-reinstall dist/agent_workflow-0.1.0-py3-none-any.whl
-      - run: python -m pytest tests/migration tests/integration/test_migration_golden.py -q
-      - run: python -m pytest -v
-      - run: python tests/installed_cli_smoke.py
+      - name: Install test and build requirements
+        run: python -m pip install "setuptools>=75" "pytest>=8.3"
+      - name: Install package from source
+        run: >-
+          python -m pip install
+          --no-build-isolation
+          --no-deps
+          --force-reinstall
+          .
+      - name: Run release gate
+        run: python scripts/release_check.py --artifact-dir dist
+      - name: Upload deterministic release artifact
+        if: matrix.os == 'ubuntu-latest' && matrix.python == '3.11'
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-workflow-pyz
+          if-no-files-found: error
+          path: |
+            dist/agent-workflow.pyz
+            dist/agent-workflow.pyz.sha256

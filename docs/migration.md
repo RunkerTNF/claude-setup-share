@@ -5,6 +5,11 @@ mixed setup into the neutral `.agents/` layout. It is conservative by design:
 the manager previews every write, treats source files as immutable inputs, and
 keeps the old native setup unless replacement is requested explicitly.
 
+For ownership and data flow, see [architecture](architecture.md). The
+credential, no-clobber, transaction, and external-adapter trust boundary is
+defined in [safety](safety.md). Adapter authors should also read
+[the adapter contract](adapter-authoring.md).
+
 Use the installed `agent-workflow-migrate` skill when an agent is performing
 the migration. The skill and the manager archive remain in `.agents/` after
 the bootstrap repository is removed.
@@ -191,6 +196,10 @@ External adapters can participate in import and mapping, but automatic native
 replacement requires installed built-in planning support. Keep the old native
 files and finish their adapter-specific entrypoints manually when that support
 is unavailable.
+
+An external adapter's capability claims do not make it guaranteed. Mapping
+coverage, sanitized fixtures, doctor validation, and versioned live smoke are
+required by the [adapter support policy](adapter-authoring.md).
 
 ## Backup, rollback, and recovery
 

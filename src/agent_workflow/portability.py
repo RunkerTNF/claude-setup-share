@@ -214,7 +214,13 @@ def _references(text: str) -> tuple[str, ...]:
             candidate
             and not _is_external(candidate)
             and not _is_vendor_path(candidate)
+            and not _is_neutral_runtime_path(candidate)
             and not _follows_vendor_environment_token(text, match.start())
+            and not _follows_home_runtime_token(
+                text,
+                match.start(),
+                candidate,
+            )
         ):
             found.add(candidate)
     for match in _BARE_FILE_REFERENCE.finditer(text):
@@ -255,12 +261,38 @@ def _is_vendor_path(reference: str) -> bool:
     return re.match(r"^\.(?:claude|codex)(?:[\\/]|$)", reference, re.IGNORECASE) is not None
 
 
+def _is_neutral_runtime_path(reference: str) -> bool:
+    try:
+        normalized = normalize_relative_path(reference)
+    except ValueError:
+        return False
+    parts = normalized.split("/")
+    return len(parts) > 1 and parts[0].casefold() == ".agents"
+
+
 def _follows_vendor_environment_token(text: str, start: int) -> bool:
     return re.search(
         r"\$(?:\{(?:CLAUDE_SKILL_DIR|CLAUDE_PLUGIN_ROOT|CODEX_HOME)\}|(?:CLAUDE_SKILL_DIR|CLAUDE_PLUGIN_ROOT|CODEX_HOME)\b)[\\/]$",
         text[:start],
         re.IGNORECASE,
     ) is not None
+
+
+def _follows_home_runtime_token(
+    text: str,
+    start: int,
+    reference: str,
+) -> bool:
+    if (
+        not text[:start].endswith("~")
+        or not reference.startswith(("/", "\\"))
+    ):
+        return False
+    try:
+        normalize_relative_path(reference.lstrip("/\\"))
+    except ValueError:
+        return False
+    return True
 
 
 def _looks_like_bare_reference(text: str, start: int) -> bool:

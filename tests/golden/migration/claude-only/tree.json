@@ -1,13 +1,13 @@
 {
   "RULES.md": {
-    "sha256": "d2ae4f0c7c2e0359972b456f796c7c76cd1f097edf1d0517447738fe2834f814",
-    "size_bytes": 296,
-    "text": "# Agent Workflow Rules\n\nThis file is the neutral, global source of truth for workflow rules shared by configured agents.\n\nBefore the first response or action, read every Markdown file under `rules/`\nbeside this file in lexical order. Then read\n`overlays/<current-agent>/RULES.md` when it exists.\n"
+    "sha256": "3b138a7bdfb9ad9d0a0108de652ad2f4ddc1614d6032bb45b40ec33454f6e1bb",
+    "size_bytes": 1558,
+    "text": "# Agent Workflow Rules\n\n`.agents/RULES.md` is the neutral, global source of truth for workflow rules\nshared by configured agents.\n\nBefore the first response or action:\n\n1. Read every Markdown file under `.agents/rules/` in lexical order.\n2. Read `.agents/memory/MEMORY.md` and only the entries relevant to the task.\n3. Read `.agents/overlays/<current-agent>/RULES.md` when it exists.\n\nKeep universal behavior in `.agents`; native agent files are generated\nentrypoints or adapter-owned settings, not competing sources of truth.\nProject rules add to these global rules and take precedence only for their\nproject.\n\nPreserve unrelated working-tree changes. Inspect scope and current state before\nediting, never hide user changes, and require explicit approval for destructive\nor hard-to-recover actions. Verify changed behavior in proportion to its risk\nbefore reporting completion.\n\nStore durable global knowledge under `.agents/memory/` and index it in\n`.agents/memory/MEMORY.md` as soon as it becomes useful. Store chronological\ncontinuation context in a project's `.agents/sessions/`; session notes are\ncontext, not always-on rules.\n\nUse the portable `plan-review` skill to critique non-trivial implementation\nplans before implementation and `code-review` to critique non-trivial pending\nchanges before reporting completion or integration. The current agent performs\neach review unless the user explicitly requests delegation and the active\nagent supports it. Agent overlays may describe invocation mechanics but never\nreplace the portable review contracts.\n"
   },
   "manifest.json": {
-    "sha256": "b38e7d819b53f0ce16dd86d9e2e8b8d69b6055a7313715c21370ffa098f03385",
-    "size_bytes": 360,
-    "text": "{\n  \"bootstrap_root\": null,\n  \"generated_files\": {\n    \"neutral:RULES.md\": \"d2ae4f0c7c2e0359972b456f796c7c76cd1f097edf1d0517447738fe2834f814\",\n    \"neutral:memory/MEMORY.md\": \"026f95f4544092d38834af2c71b5e3cd8fcd1095b83e258d67c06b46147324fb\"\n  },\n  \"generator_version\": \"0.1.0\",\n  \"profile\": null,\n  \"schema_version\": 1,\n  \"scope\": \"global\",\n  \"targets\": []\n}\n"
+    "sha256": "908807326a1b839094f11d7d689da33a58e81356dab8f7ea9bb478e712dee809",
+    "size_bytes": 385,
+    "text": "{\n  \"bootstrap_root\": null,\n  \"excluded_skills\": [],\n  \"generated_files\": {\n    \"neutral:RULES.md\": \"3b138a7bdfb9ad9d0a0108de652ad2f4ddc1614d6032bb45b40ec33454f6e1bb\",\n    \"neutral:memory/MEMORY.md\": \"358215c449c2995a7c6295ecbbca2c3e709167bbff4c0e2d02f03186ccfe538e\"\n  },\n  \"generator_version\": \"0.1.0\",\n  \"profile\": null,\n  \"schema_version\": 1,\n  \"scope\": \"global\",\n  \"targets\": []\n}\n"
   },
   "memory/IMPORTED.md": {
     "sha256": "b7337aedb4e050860bf627bdaa446c8949b1ed0be5800529124a09fda84399a6",
@@ -15,9 +15,9 @@
     "text": "# Imported Memory Index\n\nImport timestamp: 2026-07-29T00:00:00Z\n\n| Path | Title | Source agent | Source label | Source SHA-256 |\n|---|---|---|---|---|\n| memory/preferences-from-claude.md | Preferences | claude | .claude/memory/preferences.md | 0ed7630bb02af7c8b7ce2975f90b1735c8c9b500f140c7a224d6c2aabf8a951b |\n"
   },
   "memory/MEMORY.md": {
-    "sha256": "026f95f4544092d38834af2c71b5e3cd8fcd1095b83e258d67c06b46147324fb",
-    "size_bytes": 259,
-    "text": "# Global Memory Index\n\nAdd durable global notes under the typed `feedback/`, `user/`, and `reference/` directories, then index them here.\n\nWhen `~/.agents/memory/IMPORTED.md` exists, use it as the provenance index for\nnotes imported from legacy agent setups.\n"
+    "sha256": "358215c449c2995a7c6295ecbbca2c3e709167bbff4c0e2d02f03186ccfe538e",
+    "size_bytes": 490,
+    "text": "# Global Memory Index\n\nAdd durable global notes under the typed `feedback/`, `user/`, and `reference/`\ndirectories, then index them here. Each index entry should say when the note is\nrelevant rather than merely repeat its filename.\n\nCapture durable knowledge when it is learned. Keep task progress and temporary\nstate out of memory; use a project session note instead.\n\nWhen `~/.agents/memory/IMPORTED.md` exists, use it as the provenance index for\nnotes imported from legacy agent setups.\n"
   },
   "memory/preferences-from-claude.md": {
     "sha256": "8a1a7920bd7f616281425a0851003fc390e0221d2691e6e560110168b91919bb",

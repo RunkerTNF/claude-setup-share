@@ -51,6 +51,33 @@ def build_parser() -> argparse.ArgumentParser:
     scan.add_argument("--agents", action="store_true")
     _add_adapter_arguments(scan)
 
+    setup_workflow = subcommands.add_parser("setup")
+    setup_subcommands = setup_workflow.add_subparsers(
+        dest="setup_command",
+        required=True,
+    )
+    setup_detect = setup_subcommands.add_parser("detect")
+    _add_setup_scope_arguments(setup_detect)
+    _add_host_arguments(setup_detect)
+    _add_adapter_arguments(setup_detect)
+
+    setup_preview = setup_subcommands.add_parser("preview")
+    _add_setup_scope_arguments(setup_preview)
+    setup_preview.add_argument("--source-root")
+    setup_preview.add_argument("--manage-syncprotect", action="store_true")
+    setup_preview.add_argument("--exclude-skill", action="append", default=[])
+    setup_preview.add_argument(
+        "--include-claude-statusline",
+        action="store_true",
+    )
+    setup_preview.add_argument("--output", required=True)
+    _add_host_arguments(setup_preview)
+    _add_adapter_arguments(setup_preview)
+
+    setup_apply = setup_subcommands.add_parser("apply")
+    setup_apply.add_argument("--plan", required=True)
+    setup_apply.add_argument("--yes", action="store_true")
+
     plan = subcommands.add_parser("plan")
     plan_subcommands = plan.add_subparsers(dest="plan_command", required=True)
     init = plan_subcommands.add_parser("init")
@@ -73,6 +100,11 @@ def build_parser() -> argparse.ArgumentParser:
     setup.add_argument("--target", action="append", default=[])
     setup.add_argument("--source-root")
     setup.add_argument("--manage-syncprotect", action="store_true")
+    setup.add_argument("--exclude-skill", action="append", default=[])
+    setup.add_argument(
+        "--include-claude-statusline",
+        action="store_true",
+    )
     setup.add_argument("--output", required=True)
     _add_host_arguments(setup)
     _add_adapter_arguments(setup)
@@ -81,7 +113,12 @@ def build_parser() -> argparse.ArgumentParser:
     apply.add_argument("plan")
 
     doctor = subcommands.add_parser("doctor")
-    doctor.add_argument("--scope-root", required=True)
+    doctor.add_argument("--scope-root")
+    doctor.add_argument(
+        "--scope",
+        choices=tuple(scope.value for scope in Scope),
+    )
+    _add_host_arguments(doctor)
     doctor.add_argument("--json", action="store_true")
 
     rollback = subcommands.add_parser("rollback")
@@ -161,6 +198,21 @@ def main(argv: Sequence[str] | None = None) -> int:
             parser.print_help()
         elif args.command == "scan":
             _handle_scan(args)
+        elif (
+            args.command == "setup"
+            and args.setup_command == "detect"
+        ):
+            return _handle_setup_detect(args)
+        elif (
+            args.command == "setup"
+            and args.setup_command == "preview"
+        ):
+            return _handle_setup_preview(args)
+        elif (
+            args.command == "setup"
+            and args.setup_command == "apply"
+        ):
+            return _handle_setup_apply(args)
         elif args.command == "plan" and args.plan_command == "init":
             return _handle_plan_init(args)
         elif args.command == "plan" and args.plan_command == "setup":
@@ -231,6 +283,20 @@ def _add_adapter_arguments(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def _add_setup_scope_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--scope",
+        choices=tuple(scope.value for scope in Scope),
+        required=True,
+    )
+    parser.add_argument(
+        "--profile",
+        choices=tuple(profile.value for profile in ProjectProfile),
+    )
+    parser.add_argument("--project")
+    parser.add_argument("--target", action="append", default=[])
+
+
 def _add_migration_scope_arguments(
     parser: argparse.ArgumentParser,
 ) -> None:
@@ -248,6 +314,20 @@ def _add_migration_scope_arguments(
 def _host_paths(args: argparse.Namespace) -> HostPaths:
     home = Path(args.home) if args.home is not None else Path.home()
     cwd = Path(args.cwd) if args.cwd is not None else Path.cwd()
+    return HostPaths.discover(home=home, cwd=cwd)
+
+
+def _setup_paths(args: argparse.Namespace) -> HostPaths:
+    if args.project is not None and args.cwd is not None:
+        raise ValueError("use either --project or --cwd, not both")
+    home = Path(args.home) if args.home is not None else Path.home()
+    cwd = (
+        Path(args.project)
+        if args.project is not None
+        else Path(args.cwd)
+        if args.cwd is not None
+        else Path.cwd()
+    )
     return HostPaths.discover(home=home, cwd=cwd)
 
 
@@ -324,6 +404,146 @@ def _handle_plan_init(args: argparse.Namespace) -> int:
     return 3 if plan.conflicts else 0
 
 
+def _handle_setup_detect(args: argparse.Namespace) -> int:
+    paths = _setup_paths(args)
+    scope, profile = _setup_scope(args, paths)
+    registry = _registry_for_cli(
+        paths.home,
+        tuple(Path(path) for path in args.adapter_dir),
+        tuple(args.trust_adapter_code),
+    )
+    context = AdapterContext(
+        home=paths.home,
+        project_root=(
+            paths.project_root if scope is Scope.PROJECT else None
+        ),
+        neutral_root=(
+            paths.home / ".agents"
+            if scope is Scope.GLOBAL
+            else paths.project_root / ".agents"
+        ),
+        scope=scope,
+        profile=profile,
+        generator_version=__version__,
+    )
+    detections = detect_setup_targets(context, registry)
+    print("Detected adapters:")
+    for detection in detections:
+        state = "installed" if detection.installed else "not-installed"
+        warning = f"; {detection.warning}" if detection.warning else ""
+        print(f"- {detection.adapter_id}: {state}{warning}")
+    return 0
+
+
+def _handle_setup_preview(args: argparse.Namespace) -> int:
+    paths = _setup_paths(args)
+    scope, profile = _setup_scope(args, paths)
+    registry = _registry_for_cli(
+        paths.home,
+        tuple(Path(path) for path in args.adapter_dir),
+        tuple(args.trust_adapter_code),
+    )
+    targets = tuple(args.target)
+    if not targets:
+        context = AdapterContext(
+            home=paths.home,
+            project_root=(
+                paths.project_root
+                if scope is Scope.PROJECT
+                else None
+            ),
+            neutral_root=(
+                paths.home / ".agents"
+                if scope is Scope.GLOBAL
+                else paths.project_root / ".agents"
+            ),
+            scope=scope,
+            profile=profile,
+            generator_version=__version__,
+        )
+        targets = tuple(
+            item.adapter_id
+            for item in detect_setup_targets(context, registry)
+            if item.installed
+        )
+    request = SetupRequest(
+        home=paths.home,
+        project_root=(
+            paths.project_root if scope is Scope.PROJECT else None
+        ),
+        source_root=(
+            Path(args.source_root)
+            if args.source_root is not None
+            else Path.cwd()
+        ),
+        scope=scope,
+        profile=profile,
+        targets=targets,
+        manage_syncprotect=args.manage_syncprotect,
+        adapter_sources=tuple(
+            Path(path) for path in args.adapter_dir
+        ),
+        trusted_adapter_ids=tuple(args.trust_adapter_code),
+        excluded_skills=tuple(args.exclude_skill),
+        include_claude_statusline=args.include_claude_statusline,
+    )
+    plan = build_setup_plan(request)
+    output = Path(args.output)
+    output.write_text(plan.to_json(), encoding="utf-8")
+    print("Setup preview:")
+    print(plan.to_json(), end="")
+    print(
+        f"wrote setup plan: {output} "
+        f"({len(plan.operations)} operations, "
+        f"{len(plan.conflicts)} conflicts, "
+        f"{len(plan.warnings)} warnings)"
+    )
+    return 3 if plan.conflicts else 0
+
+
+def _handle_setup_apply(args: argparse.Namespace) -> int:
+    plan_path = Path(args.plan)
+    plan = TransactionPlan.from_json(
+        plan_path.read_text(encoding="utf-8")
+    )
+    if not args.yes:
+        answer = input("Apply this exact setup plan? [y/N] ")
+        if answer.strip().casefold() not in {"y", "yes"}:
+            print("setup cancelled; no changes applied")
+            return 1
+    journal = apply_plan(plan)
+    print(
+        f"applied transaction {journal.transaction_id}: "
+        f"{journal.status}; journal: {journal.journal_path}"
+    )
+    return _report_doctor(Path(plan.scope_root), json_output=False)
+
+
+def _setup_scope(
+    args: argparse.Namespace,
+    paths: HostPaths,
+) -> tuple[Scope, ProjectProfile | None]:
+    scope = Scope(args.scope)
+    profile = (
+        ProjectProfile(args.profile)
+        if args.profile is not None
+        else None
+    )
+    if scope is Scope.GLOBAL:
+        if profile is not None or args.project is not None:
+            raise ValueError(
+                "global setup does not accept --profile or --project"
+            )
+    else:
+        if profile is None:
+            raise ValueError("project setup requires --profile")
+        if paths.project_root is None:
+            raise ValueError(
+                "project setup requires a discovered project root"
+            )
+    return scope, profile
+
+
 def _handle_plan_setup(args: argparse.Namespace) -> int:
     scope = Scope(args.scope)
     profile = (
@@ -354,6 +574,8 @@ def _handle_plan_setup(args: argparse.Namespace) -> int:
             Path(path) for path in args.adapter_dir
         ),
         trusted_adapter_ids=tuple(args.trust_adapter_code),
+        excluded_skills=tuple(args.exclude_skill),
+        include_claude_statusline=args.include_claude_statusline,
     )
     plan = build_setup_plan(request)
     output = Path(args.output)
@@ -374,8 +596,29 @@ def _handle_apply(args: argparse.Namespace) -> None:
 
 
 def _handle_doctor(args: argparse.Namespace) -> int:
-    diagnostics = run_doctor(Path(args.scope_root))
-    if args.json:
+    if args.scope_root is not None and args.scope is not None:
+        raise ValueError("use either --scope-root or --scope, not both")
+    if args.scope_root is not None:
+        scope_root = Path(args.scope_root)
+    elif args.scope is not None:
+        paths = _host_paths(args)
+        scope = Scope(args.scope)
+        if scope is Scope.GLOBAL:
+            scope_root = paths.home / ".agents"
+        else:
+            if paths.project_root is None:
+                raise ValueError(
+                    "project doctor requires a discovered project root"
+                )
+            scope_root = paths.project_root / ".agents"
+    else:
+        raise ValueError("doctor requires --scope-root or --scope")
+    return _report_doctor(scope_root, json_output=args.json)
+
+
+def _report_doctor(scope_root: Path, *, json_output: bool) -> int:
+    diagnostics = run_doctor(scope_root)
+    if json_output:
         _print_json(
             {
                 "blocking": any(item.severity is Severity.BLOCKING for item in diagnostics),

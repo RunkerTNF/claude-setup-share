@@ -10,6 +10,10 @@ from agent_workflow.adapters.base import (
     AgentAdapter,
     InventoryRoot,
 )
+from agent_workflow.hashing import (
+    sha256_bytes,
+    sha256_runtime_normalized,
+)
 from agent_workflow.manifest import WorkflowManifest
 from agent_workflow.model import Scope
 
@@ -65,7 +69,11 @@ def scan_migration_inventory(
             if identity in seen_candidates:
                 continue
             seen_candidates.add(identity)
-            if resolved in manager_owned:
+            if _candidate_is_manager_owned(
+                candidate,
+                item.boundary,
+                manager_owned,
+            ):
                 continue
             record = _record_artifact(
                 item,
@@ -380,10 +388,101 @@ def _manager_owned_paths(
             base = neutral_root if root_id == "neutral" else scope_root
             if base is None:
                 continue
+            target = base.joinpath(*relative_path.split("/"))
+            content = _safe_managed_content(target, base)
+            if content is None:
+                continue
+            accepted = {
+                sha256_bytes(content),
+                sha256_runtime_normalized(
+                    content,
+                    home=(
+                        context.home
+                        if manifest.scope is Scope.GLOBAL
+                        else None
+                    ),
+                    project=(
+                        context.project_root
+                        if manifest.scope is Scope.PROJECT
+                        else None
+                    ),
+                ),
+            }
+            if manifest.generated_files[generated_key] not in accepted:
+                label = _portable_root_label(context, neutral_root)
+                warnings.append(
+                    f"{label}: managed file hash drift: "
+                    f"{root_id}:{relative_path}"
+                )
+                continue
             output.add(
-                base.joinpath(*relative_path.split("/")).resolve(strict=False)
+                target.resolve(strict=False)
             )
     return frozenset(output)
+
+
+def _safe_managed_content(target: Path, base: Path) -> bytes | None:
+    current = base
+    try:
+        relative = target.relative_to(base)
+    except ValueError:
+        return None
+    for part in relative.parts:
+        current /= part
+        if current.is_symlink():
+            return None
+    if not target.is_file():
+        return None
+    try:
+        return target.read_bytes()
+    except OSError:
+        return None
+
+
+def _candidate_is_manager_owned(
+    candidate: Path,
+    boundary: Path,
+    manager_owned: frozenset[Path],
+) -> bool:
+    resolved = _safe_resolve(candidate)
+    if resolved is None:
+        return False
+    if candidate.is_file():
+        return resolved in manager_owned
+    if not candidate.is_dir() or candidate.is_symlink():
+        return False
+
+    resolved_boundary = _safe_resolve(boundary)
+    if (
+        resolved_boundary is None
+        or not _is_within(resolved, resolved_boundary)
+    ):
+        return False
+    files: list[Path] = []
+    stack = [candidate]
+    while stack:
+        current = stack.pop()
+        if current.is_symlink():
+            return False
+        try:
+            children = tuple(current.iterdir())
+        except OSError:
+            return False
+        for child in children:
+            resolved_child = _safe_resolve(child)
+            if (
+                resolved_child is None
+                or not _is_within(resolved_child, resolved_boundary)
+                or child.is_symlink()
+            ):
+                return False
+            if child.is_dir():
+                stack.append(child)
+            elif child.is_file():
+                files.append(resolved_child)
+            else:
+                return False
+    return bool(files) and all(path in manager_owned for path in files)
 
 
 def _neutral_roots(context: AdapterContext) -> tuple[Path, ...]:

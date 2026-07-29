@@ -15,10 +15,20 @@ from .hashing import sha256_bytes, sha256_runtime_normalized
 from .layout import plan_neutral_init
 from .manifest import WorkflowManifest
 from .model import Ownership, ProjectProfile, Scope
-from .package import build_manager_zipapp
+from .package import (
+    BUNDLED_SKILLS,
+    MANAGEMENT_SKILLS,
+    build_manager_zipapp,
+)
 from .paths import HostPaths
-from .plan import TransactionPlan, WriteOperation
+from .plan import (
+    DeleteOperation,
+    FileOperation,
+    TransactionPlan,
+    WriteOperation,
+)
 from .skills import (
+    PortableSkill,
     discover_portable_skills,
     plan_canonical_skill_install,
     plan_skill_install,
@@ -42,6 +52,8 @@ class SetupRequest:
     manage_syncprotect: bool
     adapter_sources: tuple[Path, ...]
     trusted_adapter_ids: tuple[str, ...]
+    excluded_skills: tuple[str, ...] = ()
+    include_claude_statusline: bool = False
 
     def __post_init__(self) -> None:
         if not isinstance(self.scope, Scope):
@@ -60,6 +72,10 @@ class SetupRequest:
             )
         if not isinstance(self.manage_syncprotect, bool):
             raise ValueError("manage_syncprotect must be boolean")
+        if not isinstance(self.include_claude_statusline, bool):
+            raise ValueError(
+                "include_claude_statusline must be boolean"
+            )
 
         home = _safe_directory(self.home, "home")
         source = _safe_directory(self.source_root, "source root")
@@ -73,6 +89,27 @@ class SetupRequest:
         trusted = _adapter_ids(
             self.trusted_adapter_ids, "trusted adapter ids"
         )
+        excluded_skills = _adapter_ids(
+            self.excluded_skills, "excluded skills"
+        )
+        if self.scope is Scope.PROJECT and excluded_skills:
+            raise ValueError(
+                "project setup does not accept skill exclusions"
+            )
+        if (
+            self.scope is Scope.PROJECT
+            and self.include_claude_statusline
+        ):
+            raise ValueError(
+                "Claude statusline is a global setup option"
+            )
+        if (
+            self.include_claude_statusline
+            and "claude" not in targets
+        ):
+            raise ValueError(
+                "Claude statusline requires the claude target"
+            )
         sources = tuple(
             _safe_directory(path, "adapter source")
             for path in self.adapter_sources
@@ -86,6 +123,7 @@ class SetupRequest:
         object.__setattr__(self, "targets", targets)
         object.__setattr__(self, "trusted_adapter_ids", trusted)
         object.__setattr__(self, "adapter_sources", sources)
+        object.__setattr__(self, "excluded_skills", excluded_skills)
 
 
 @dataclass(frozen=True)
@@ -123,7 +161,7 @@ def build_setup_plan(request: SetupRequest) -> TransactionPlan:
         root_id: Path(path) for root_id, path in base.target_roots.items()
     }
     existing_manifest = _read_manifest(target_roots["neutral"])
-    operations: dict[tuple[str, str], WriteOperation] = {}
+    operations: dict[tuple[str, str], FileOperation] = {}
     conflicts = list(base.conflicts)
     for operation in base.operations:
         if operation.root_id == "neutral" and operation.path == "manifest.json":
@@ -149,14 +187,32 @@ def build_setup_plan(request: SetupRequest) -> TransactionPlan:
                 ownership=Ownership.GENERATED,
             )
         )
-        skills = discover_portable_skills(request.source_root / "skills")
+        skills = _shipped_skills(request)
     else:
         _verify_global_install(request.home)
-        skills = discover_portable_skills(
-            target_roots["neutral"] / "skills"
-        )
+        skills = ()
 
     additions.extend(plan_canonical_skill_install(context, skills))
+    if request.include_claude_statusline:
+        additions.append(
+            _write_operation(
+                root_id="scope",
+                path=".claude/statusline.js",
+                content=_source_file(
+                    request.source_root,
+                    (
+                        "src",
+                        "agent_workflow",
+                        "adapters",
+                        "claude",
+                        "assets",
+                        "statusline.js",
+                    ),
+                ),
+                target_roots=target_roots,
+                ownership=Ownership.GENERATED,
+            )
+        )
     for adapter in adapters:
         additions.extend(adapter.plan_entrypoints(context))
         additions.extend(plan_skill_install(adapter, context, skills))
@@ -180,6 +236,17 @@ def build_setup_plan(request: SetupRequest) -> TransactionPlan:
             conflicts.append(conflict)
         _add_operation(operations, operation)
 
+    deletions, deletion_conflicts = _managed_optional_deletions(
+        existing_manifest,
+        request,
+        target_roots,
+        adapters,
+        context,
+    )
+    conflicts.extend(deletion_conflicts)
+    for operation in deletions:
+        _add_operation(operations, operation)
+
     if not conflicts:
         generated_files = {
             f"{operation.root_id}:{operation.path}": sha256_runtime_normalized(
@@ -193,6 +260,7 @@ def build_setup_plan(request: SetupRequest) -> TransactionPlan:
             )
             for key, operation in sorted(operations.items())
             if key not in _PROFILE_FILES
+            and isinstance(operation, WriteOperation)
         }
         final_manifest = WorkflowManifest(
             schema_version=1,
@@ -201,6 +269,7 @@ def build_setup_plan(request: SetupRequest) -> TransactionPlan:
             profile=request.profile,
             targets=request.targets,
             generated_files=generated_files,
+            excluded_skills=request.excluded_skills,
             bootstrap_root=None,
         )
         manifest_path = target_roots["neutral"] / "manifest.json"
@@ -223,8 +292,174 @@ def build_setup_plan(request: SetupRequest) -> TransactionPlan:
         allowed_roots=base.allowed_roots,
         operations=tuple(operations.values()),
         conflicts=tuple(sorted(set(conflicts))),
-        warnings=tuple(sorted(set((*base.warnings, *registry_warnings)))),
+        warnings=tuple(
+            sorted(
+                set(
+                    (
+                        *base.warnings,
+                        *registry_warnings,
+                        *(
+                            f"excluded skill: {name}"
+                            for name in request.excluded_skills
+                        ),
+                        *(
+                            ("optional Claude statusline enabled",)
+                            if request.include_claude_statusline
+                            else ()
+                        ),
+                    )
+                )
+            )
+        ),
     )
+
+
+def _shipped_skills(
+    request: SetupRequest,
+) -> tuple[PortableSkill, ...]:
+    if MANAGEMENT_SKILLS.intersection(request.excluded_skills):
+        names = ", ".join(
+            sorted(
+                MANAGEMENT_SKILLS.intersection(
+                    request.excluded_skills
+                )
+            )
+        )
+        raise ValueError(f"cannot exclude management skill: {names}")
+
+    discovered = {
+        skill.name: skill
+        for skill in discover_portable_skills(
+            request.source_root / "skills"
+        )
+    }
+    missing = set(BUNDLED_SKILLS) - set(discovered)
+    if missing:
+        raise ValueError(
+            "source root is missing shipped skills: "
+            + ", ".join(sorted(missing))
+        )
+    unknown = set(request.excluded_skills) - set(BUNDLED_SKILLS)
+    if unknown:
+        raise ValueError(
+            "cannot exclude unknown shipped skill: "
+            + ", ".join(sorted(unknown))
+        )
+    return tuple(
+        discovered[name]
+        for name in BUNDLED_SKILLS
+        if name not in request.excluded_skills
+    )
+
+
+def _source_file(source_root: Path, parts: tuple[str, ...]) -> bytes:
+    current = source_root
+    for part in parts:
+        current /= part
+        if current.is_symlink():
+            raise ValueError(
+                "setup source resource must not be symlinked"
+            )
+    try:
+        resolved = current.resolve(strict=True)
+        resolved.relative_to(source_root)
+    except (OSError, ValueError) as error:
+        raise ValueError(
+            "setup source resource is missing or unsafe"
+        ) from error
+    if not resolved.is_file():
+        raise ValueError("setup source resource is missing or unsafe")
+    return resolved.read_bytes()
+
+
+def _managed_optional_deletions(
+    manifest: WorkflowManifest | None,
+    request: SetupRequest,
+    target_roots: dict[str, Path],
+    adapters: tuple[AgentAdapter, ...],
+    context: AdapterContext,
+) -> tuple[tuple[DeleteOperation, ...], tuple[str, ...]]:
+    if manifest is None:
+        return (), ()
+
+    excluded = frozenset(request.excluded_skills)
+    operations: list[DeleteOperation] = []
+    conflicts: list[str] = []
+    for key, managed_digest in sorted(manifest.generated_files.items()):
+        root_id, path = key.split(":", 1)
+        remove_skill = _is_managed_skill_path(
+            root_id,
+            path,
+            excluded,
+            adapters,
+            context,
+        )
+        remove_statusline = (
+            root_id == "scope"
+            and path == ".claude/statusline.js"
+            and not request.include_claude_statusline
+        )
+        if not remove_skill and not remove_statusline:
+            continue
+        root = target_roots[root_id]
+        target = root.joinpath(*path.split("/"))
+        current_digest = safe_current_hash(target, root)
+        if current_digest is None:
+            continue
+        current = target.read_bytes()
+        accepted = {
+            current_digest,
+            sha256_runtime_normalized(
+                current,
+                home=request.home,
+                project=request.project_root,
+            ),
+        }
+        if managed_digest not in accepted:
+            conflicts.append(f"managed output modified: {key}")
+            continue
+        operations.append(
+            DeleteOperation(
+                root_id=root_id,
+                path=path,
+                expected_sha256=current_digest,
+                ownership=(
+                    Ownership.CANONICAL
+                    if root_id == "neutral"
+                    else Ownership.GENERATED
+                ),
+            )
+        )
+    return tuple(operations), tuple(conflicts)
+
+
+def _is_managed_skill_path(
+    root_id: str,
+    path: str,
+    excluded: frozenset[str],
+    adapters: tuple[AgentAdapter, ...],
+    context: AdapterContext,
+) -> bool:
+    if root_id == "neutral":
+        return any(
+            path.startswith(f"skills/{name}/")
+            for name in excluded
+        )
+    if root_id != "scope":
+        return False
+    for adapter in adapters:
+        manifest = getattr(adapter, "manifest", None)
+        if manifest is None:
+            continue
+        for location in manifest.for_scope(context.scope).skill_locations:
+            if location.mode != "wrapper":
+                continue
+            if any(
+                path.startswith(f"{location.path}/{name}/")
+                for name in excluded
+            ):
+                return True
+    return False
 
 
 def _setup_registry(
@@ -458,8 +693,8 @@ def _write_operation(
 
 
 def _add_operation(
-    operations: dict[tuple[str, str], WriteOperation],
-    operation: WriteOperation,
+    operations: dict[tuple[str, str], FileOperation],
+    operation: FileOperation,
 ) -> None:
     key = (operation.root_id, operation.path)
     previous = operations.get(key)

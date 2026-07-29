@@ -136,6 +136,10 @@ def apply_plan(plan: TransactionPlan) -> TransactionJournal:
                 else:
                     _verify_current_target(item.target, item.before_sha256, context="source changed during apply")
                     item.target.unlink()
+                    _cleanup_empty_parents(
+                        item.target.parent,
+                        Path(plan.target_roots[item.operation.root_id]),
+                    )
             journal = journal.with_status("committed")
             _write_journal(journal)
             return journal

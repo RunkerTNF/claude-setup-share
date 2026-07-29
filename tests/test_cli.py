@@ -44,3 +44,38 @@ def test_parser_exposes_agent_scan_and_setup_plan() -> None:
     assert scan.agents is True
     assert setup.plan_command == "setup"
     assert setup.target == ["codex"]
+
+
+def test_parser_exposes_safe_setup_workflow_and_scoped_doctor() -> None:
+    parser = build_parser()
+
+    detected = parser.parse_args(
+        ["setup", "detect", "--scope", "global"]
+    )
+    preview = parser.parse_args(
+        [
+            "setup",
+            "preview",
+            "--scope",
+            "project",
+            "--project",
+            "repo",
+            "--profile",
+            "split",
+            "--output",
+            "plan.json",
+        ]
+    )
+    applied = parser.parse_args(
+        ["setup", "apply", "--plan", "plan.json", "--yes"]
+    )
+    doctor = parser.parse_args(
+        ["doctor", "--scope", "global", "--home", "home"]
+    )
+
+    assert detected.setup_command == "detect"
+    assert preview.setup_command == "preview"
+    assert preview.project == "repo"
+    assert applied.setup_command == "apply"
+    assert applied.yes is True
+    assert doctor.scope == "global"
