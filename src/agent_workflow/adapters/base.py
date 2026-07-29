@@ -3,11 +3,18 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from agent_workflow.doctor import Diagnostic
 from agent_workflow.model import ProjectProfile, Scope
 from agent_workflow.plan import WriteOperation
+
+if TYPE_CHECKING:
+    from agent_workflow.migration.mappings import (
+        MappedNativeArtifact,
+        NativeMappingContext,
+    )
+    from agent_workflow.migration.model import ArtifactRecord
 
 
 class CapabilityStatus(StrEnum):
@@ -112,4 +119,12 @@ class AgentAdapter(Protocol):
     def inventory_roots(
         self, context: AdapterContext
     ) -> tuple[InventoryRoot, ...]:
+        raise NotImplementedError
+
+    def map_native_artifact(
+        self,
+        record: ArtifactRecord,
+        safe_content: object,
+        target_context: NativeMappingContext,
+    ) -> MappedNativeArtifact:
         raise NotImplementedError
