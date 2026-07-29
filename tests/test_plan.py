@@ -124,3 +124,45 @@ def test_plan_rejects_invalid_hash_and_missing_delete_hash() -> None:
     }
     with pytest.raises(ValueError, match="delete operation requires an expected SHA-256"):
         TransactionPlan.from_json(json.dumps(payload))
+
+
+def test_plan_cannot_contain_windows_dot_alias_target() -> None:
+    WriteOperation.from_bytes(
+        root_id="neutral",
+        path="a",
+        content=b"first",
+        expected_sha256=None,
+        ownership=Ownership.GENERATED,
+    )
+    with pytest.raises(ValueError, match="safe relative path"):
+        WriteOperation.from_bytes(
+            root_id="neutral",
+            path="a.",
+            content=b"second",
+            expected_sha256=None,
+            ownership=Ownership.GENERATED,
+        )
+
+
+@pytest.mark.parametrize("path", ("a ", "rules:backup", "CON/readme.md"))
+def test_write_operation_rejects_windows_unsafe_path_aliases(path: str) -> None:
+    with pytest.raises(ValueError, match="safe relative path"):
+        WriteOperation.from_bytes(
+            root_id="neutral",
+            path=path,
+            content=b"content",
+            expected_sha256=None,
+            ownership=Ownership.GENERATED,
+        )
+
+
+def test_direct_plan_constructor_rejects_non_deterministic_plan_id() -> None:
+    with pytest.raises(ValueError, match="plan_id does not match plan content"):
+        TransactionPlan(
+            schema_version=1,
+            plan_id="11111111-1111-1111-1111-111111111111",
+            scope_root="/tmp/project/.agents",
+            target_roots={"neutral": "/tmp/project/.agents", "scope": "/tmp/project"},
+            allowed_roots=("/tmp/project",),
+            operations=(),
+        )

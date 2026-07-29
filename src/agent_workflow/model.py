@@ -7,6 +7,18 @@ from pathlib import PurePosixPath, PureWindowsPath
 
 ROOT_IDS = frozenset({"neutral", "scope"})
 _SHA256_RE = re.compile(r"[0-9a-f]{64}\Z")
+_WINDOWS_DEVICE_NAMES = frozenset(
+    {
+        "con",
+        "prn",
+        "aux",
+        "nul",
+        "conin$",
+        "conout$",
+        *(f"com{number}" for number in range(1, 10)),
+        *(f"lpt{number}" for number in range(1, 10)),
+    }
+)
 
 
 class Scope(StrEnum):
@@ -56,6 +68,10 @@ def normalize_relative_path(path: str) -> str:
         if part in ("", "."):
             continue
         if part == "..":
+            raise ValueError("path must be a safe relative path")
+        if part.endswith((" ", ".")) or ":" in part:
+            raise ValueError("path must be a safe relative path")
+        if part.split(".", 1)[0].casefold() in _WINDOWS_DEVICE_NAMES:
             raise ValueError("path must be a safe relative path")
         parts.append(part)
     if not parts:

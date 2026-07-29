@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import base64
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 import json
 import ntpath
 import posixpath
@@ -27,6 +27,7 @@ _PLAN_KEYS = frozenset(
 )
 _WRITE_KEYS = frozenset({"kind", "root_id", "path", "content_b64", "expected_sha256", "ownership"})
 _DELETE_KEYS = frozenset({"kind", "root_id", "path", "expected_sha256", "ownership"})
+_PLAN_ID_SENTINEL = "00000000-0000-0000-0000-000000000000"
 
 
 def _validate_operation_fields(root_id: str, path: str, expected_sha256: str | None, ownership: Ownership) -> tuple[str, str]:
@@ -159,7 +160,12 @@ class TransactionPlan:
         object.__setattr__(self, "operations", tuple(sorted(self.operations, key=_operation_sort_key)))
         object.__setattr__(self, "conflicts", tuple(self.conflicts))
         object.__setattr__(self, "warnings", tuple(self.warnings))
-        self.validate()
+        self._validate_contents()
+        derived_plan_id = self._derived_plan_id()
+        if self.plan_id == _PLAN_ID_SENTINEL:
+            object.__setattr__(self, "plan_id", derived_plan_id)
+        else:
+            self._validate_plan_id(derived_plan_id)
 
     @classmethod
     def new(
@@ -172,9 +178,9 @@ class TransactionPlan:
         conflicts: tuple[str, ...] = (),
         warnings: tuple[str, ...] = (),
     ) -> "TransactionPlan":
-        provisional = cls(
+        return cls(
             schema_version=1,
-            plan_id="00000000-0000-0000-0000-000000000000",
+            plan_id=_PLAN_ID_SENTINEL,
             scope_root=scope_root,
             target_roots=target_roots,
             allowed_roots=allowed_roots,
@@ -182,15 +188,22 @@ class TransactionPlan:
             conflicts=conflicts,
             warnings=warnings,
         )
-        return replace(provisional, plan_id=provisional._derived_plan_id())
 
     def validate(self) -> None:
-        if type(self.schema_version) is not int or self.schema_version != 1:
-            raise ValueError(f"unsupported schema version: {self.schema_version}")
+        self._validate_contents()
+        self._validate_plan_id(self._derived_plan_id())
+
+    def _validate_plan_id(self, derived_plan_id: str) -> None:
         try:
             UUID(self.plan_id)
         except (TypeError, ValueError) as error:
             raise ValueError("plan_id must be a UUID") from error
+        if self.plan_id != derived_plan_id:
+            raise ValueError("plan_id does not match plan content")
+
+    def _validate_contents(self) -> None:
+        if type(self.schema_version) is not int or self.schema_version != 1:
+            raise ValueError(f"unsupported schema version: {self.schema_version}")
         if set(self.target_roots) != ROOT_IDS:
             raise ValueError("target_roots must contain exactly neutral and scope")
         if not self.allowed_roots:
