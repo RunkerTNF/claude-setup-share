@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import base64
 from dataclasses import dataclass, replace
 import hashlib
+import json
 from pathlib import Path, PurePosixPath
 import re
 from types import MappingProxyType
@@ -97,6 +99,91 @@ class NormalizationBatch:
     artifacts: tuple[NormalizedArtifact, ...]
     conflicts: tuple[NormalizationConflict, ...]
     deduplications: tuple[NormalizationDeduplication, ...]
+
+    def to_json(self) -> str:
+        payload = {
+            "schema_version": 1,
+            "artifacts": [
+                {
+                    "kind": artifact.kind.value,
+                    "root_id": artifact.root_id,
+                    "relative_destination": (
+                        artifact.relative_destination
+                    ),
+                    "files": {
+                        path: base64.b64encode(content).decode("ascii")
+                        for path, content in artifact.files.items()
+                    },
+                    "provenance": _provenance_payload(
+                        artifact.provenance
+                    ),
+                    "adopt_existing": artifact.adopt_existing,
+                }
+                for artifact in self.artifacts
+            ],
+            "conflicts": [
+                {
+                    "destination": conflict.destination,
+                    "candidates": list(conflict.candidates),
+                    "message": conflict.message,
+                }
+                for conflict in self.conflicts
+            ],
+            "deduplications": [
+                {
+                    "destination": item.destination,
+                    "origins": [
+                        _provenance_payload(origin)
+                        for origin in item.origins
+                    ],
+                }
+                for item in self.deduplications
+            ],
+        }
+        return json.dumps(payload, indent=2, sort_keys=True) + "\n"
+
+    @classmethod
+    def from_json(cls, raw: str) -> "NormalizationBatch":
+        try:
+            payload = json.loads(raw)
+        except json.JSONDecodeError as error:
+            raise ValueError(
+                "normalized artifact file is not valid JSON"
+            ) from error
+        _require_keys(
+            payload,
+            {
+                "schema_version",
+                "artifacts",
+                "conflicts",
+                "deduplications",
+            },
+            "normalization batch",
+        )
+        if payload["schema_version"] != 1:
+            raise ValueError(
+                "unsupported normalization batch schema"
+            )
+        artifacts = _sequence(payload["artifacts"], "artifacts")
+        conflicts = _sequence(payload["conflicts"], "conflicts")
+        deduplications = _sequence(
+            payload["deduplications"],
+            "deduplications",
+        )
+        return cls(
+            artifacts=tuple(
+                _normalized_artifact_from_payload(item)
+                for item in artifacts
+            ),
+            conflicts=tuple(
+                _normalization_conflict_from_payload(item)
+                for item in conflicts
+            ),
+            deduplications=tuple(
+                _normalization_deduplication_from_payload(item)
+                for item in deduplications
+            ),
+        )
 
 
 def normalize_deterministic(
@@ -503,6 +590,161 @@ def _document_title(text: str) -> str:
 
 def _table(value: str) -> str:
     return " ".join(value.split()).replace("|", "\\|")
+
+
+def _provenance_payload(
+    provenance: ArtifactProvenance,
+) -> dict[str, str]:
+    return {
+        "source_agent": provenance.source_agent,
+        "source_scope": provenance.source_scope,
+        "source_relative_path": provenance.source_relative_path,
+        "source_sha256": provenance.source_sha256,
+    }
+
+
+def _provenance_from_payload(
+    payload: object,
+) -> ArtifactProvenance:
+    _require_keys(
+        payload,
+        {
+            "source_agent",
+            "source_scope",
+            "source_relative_path",
+            "source_sha256",
+        },
+        "artifact provenance",
+    )
+    if any(not isinstance(value, str) for value in payload.values()):
+        raise ValueError("artifact provenance fields must be strings")
+    return ArtifactProvenance(
+        source_agent=payload["source_agent"],
+        source_scope=payload["source_scope"],
+        source_relative_path=payload["source_relative_path"],
+        source_sha256=payload["source_sha256"],
+    )
+
+
+def _normalized_artifact_from_payload(
+    payload: object,
+) -> NormalizedArtifact:
+    _require_keys(
+        payload,
+        {
+            "kind",
+            "root_id",
+            "relative_destination",
+            "files",
+            "provenance",
+            "adopt_existing",
+        },
+        "normalized artifact",
+    )
+    files_payload = payload["files"]
+    if not isinstance(files_payload, dict) or any(
+        not isinstance(key, str)
+        or not isinstance(value, str)
+        for key, value in files_payload.items()
+    ):
+        raise ValueError("normalized artifact files are invalid")
+    try:
+        files = {
+            key: base64.b64decode(value, validate=True)
+            for key, value in files_payload.items()
+        }
+        kind = ArtifactKind(payload["kind"])
+    except (TypeError, ValueError) as error:
+        raise ValueError("normalized artifact is invalid") from error
+    if type(payload["adopt_existing"]) is not bool:
+        raise ValueError(
+            "normalized artifact adopt_existing must be boolean"
+        )
+    return NormalizedArtifact(
+        kind=kind,
+        root_id=payload["root_id"],
+        relative_destination=payload["relative_destination"],
+        files=files,
+        provenance=_provenance_from_payload(payload["provenance"]),
+        adopt_existing=payload["adopt_existing"],
+    )
+
+
+def _normalization_conflict_from_payload(
+    payload: object,
+) -> NormalizationConflict:
+    _require_keys(
+        payload,
+        {"destination", "candidates", "message"},
+        "normalization conflict",
+    )
+    candidates = _string_sequence(
+        payload["candidates"],
+        "normalization conflict candidates",
+    )
+    if (
+        not isinstance(payload["destination"], str)
+        or not isinstance(payload["message"], str)
+    ):
+        raise ValueError("normalization conflict is invalid")
+    return NormalizationConflict(
+        destination=normalize_relative_path(payload["destination"]),
+        candidates=tuple(
+            normalize_relative_path(item) for item in candidates
+        ),
+        message=payload["message"],
+    )
+
+
+def _normalization_deduplication_from_payload(
+    payload: object,
+) -> NormalizationDeduplication:
+    _require_keys(
+        payload,
+        {"destination", "origins"},
+        "normalization deduplication",
+    )
+    origins = _sequence(
+        payload["origins"],
+        "normalization deduplication origins",
+    )
+    return NormalizationDeduplication(
+        destination=normalize_relative_path(payload["destination"]),
+        origins=tuple(
+            _provenance_from_payload(item) for item in origins
+        ),
+    )
+
+
+def _require_keys(
+    payload: object,
+    expected: set[str],
+    label: str,
+) -> None:
+    if not isinstance(payload, dict) or any(
+        not isinstance(key, str) for key in payload
+    ):
+        raise ValueError(f"{label} must be an object")
+    unknown = set(payload) - expected
+    missing = expected - set(payload)
+    if unknown or missing:
+        raise ValueError(f"{label} fields are invalid")
+
+
+def _sequence(payload: object, label: str) -> tuple[object, ...]:
+    if not isinstance(payload, list):
+        raise ValueError(f"{label} must be a list")
+    return tuple(payload)
+
+
+def _string_sequence(
+    payload: object,
+    label: str,
+) -> tuple[str, ...]:
+    values = _sequence(payload, label)
+    if any(not isinstance(value, str) for value in values):
+        raise ValueError(f"{label} must contain strings")
+    return tuple(values)
 
 
 def _normalized_identity(

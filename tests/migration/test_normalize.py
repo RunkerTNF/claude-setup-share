@@ -4,6 +4,7 @@ from pathlib import Path
 
 from agent_workflow.migration.model import ArtifactKind
 from agent_workflow.migration.normalize import (
+    NormalizationBatch,
     merge_memory_index,
     normalize_deterministic,
     resolve_normalized_collisions,
@@ -104,3 +105,22 @@ def test_different_collision_is_suffixed_and_remains_blocking(
     } == {"skills/pick", "skills/pick-from-claude"}
     assert len(batch.conflicts) == 1
     assert batch.deduplications == ()
+
+
+def test_normalization_batch_round_trips_without_absolute_paths(
+    tmp_path: Path,
+) -> None:
+    record, source = claude_command_fixture(
+        tmp_path,
+        name="pick",
+        body="Pick one item.\n",
+    )
+    batch = resolve_normalized_collisions(
+        (normalize_deterministic(record, source),)
+    )
+
+    serialized = batch.to_json()
+    restored = NormalizationBatch.from_json(serialized)
+
+    assert restored.to_json() == serialized
+    assert str(tmp_path) not in serialized
