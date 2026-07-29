@@ -10,3 +10,6 @@ Thumbs.db
 .idea/
 .vscode/
 *.swp
+
+# Isolated implementation worktrees
+.worktrees/
