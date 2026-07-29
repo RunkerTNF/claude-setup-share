@@ -2,6 +2,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+from typing import Any
 from uuid import UUID
 
 import pytest
@@ -11,6 +12,7 @@ from agent_workflow.hashing import sha256_file
 from agent_workflow.model import Ownership
 from agent_workflow.plan import DeleteOperation, TransactionPlan, WriteOperation
 from agent_workflow.transactions.engine import apply_plan, rollback_transaction
+from agent_workflow.transactions.journal import TransactionJournal
 from agent_workflow.transactions.lock import ScopeLock
 
 
@@ -531,7 +533,10 @@ def test_namespace_race_preserves_evidence_and_leaves_no_owned_debris(tmp_path: 
     assert b"racer" in evidence.read_bytes()
 
 
-def test_initial_journal_publication_failure_preserves_backup_and_valid_claim(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_initial_journal_publication_failure_preserves_backup_claim_marker_and_journal(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     root = tmp_path / ".agents"; root.mkdir(); target = root / "RULES.md"
     from agent_workflow.transactions import engine
     monkeypatch.setattr(engine, "_sync_initial_journal", lambda _output: (_ for _ in ()).throw(OSError("exclusive publication unavailable")))
@@ -539,12 +544,17 @@ def test_initial_journal_publication_failure_preserves_backup_and_valid_claim(tm
         apply_plan(make_plan(root, None))
     assert not target.exists()
     assert (next((root / "workflow" / "backups").iterdir()) / "inventory.json").exists()
-    claim = json.loads(next((root / "workflow" / "staging").rglob("claim.json")).read_text())
-    assert claim["schema_version"] == 1 and claim["status"] == "prepare_failed"
-    assert not list((root / "workflow" / "journals").iterdir())
+    claim_path = next((root / "workflow" / "staging").rglob("claim.json"))
+    claim = engine._read_claim(claim_path)
+    marker = engine._read_claim(claim_path.with_name("prepare_failed.json"))
+    expected_marker = dict(claim)
+    expected_marker["status"] = "prepare_failed"
+    assert claim["schema_version"] == 1 and claim["status"] == "preparing"
+    assert marker == expected_marker
+    assert list((root / "workflow" / "journals").iterdir())
 
 
-def test_unpublished_cleanup_preserves_foreign_backup_content(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_failed_publication_preserves_foreign_backup_content(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     root = tmp_path / ".agents"; root.mkdir()
     from agent_workflow.transactions import engine
     def add_foreign_then_fail(_output: object) -> None:
@@ -583,9 +593,13 @@ def test_prepublication_failure_preserves_original_error_backup_and_strict_claim
         apply_plan(make_plan(root, sha256_file(target)))
     assert target.read_bytes() == b"before"
     claim_path = next((root / "workflow" / "staging").rglob("claim.json"))
-    claim = json.loads(claim_path.read_text())
+    claim = engine._read_claim(claim_path)
+    marker = engine._read_claim(claim_path.with_name("prepare_failed.json"))
+    expected_marker = dict(claim)
+    expected_marker["status"] = "prepare_failed"
     assert set(claim) == {"schema_version", "status", "transaction_id", "token", "scope_root", "target_roots", "allowed_roots", "backup_root", "staging_root", "journal_path", "entries"}
-    assert claim["status"] == "prepare_failed" and len(claim["entries"]) == 1
+    assert claim["status"] == "preparing" and len(claim["entries"]) == 1
+    assert marker == expected_marker
     backup_dirs = list((root / "workflow" / "backups").iterdir())
     assert backup_dirs and (backup_dirs[0] / "inventory.json").exists()
 
@@ -663,7 +677,11 @@ def test_genuine_partial_preparation_retains_bytes_and_failed_claim(tmp_path: Pa
         apply_plan(plan)
     claim_path = next((root / "workflow" / "staging").rglob("claim.json"))
     claim = engine._read_claim(claim_path)
-    assert claim["status"] == "prepare_failed"
+    marker = engine._read_claim(claim_path.with_name("prepare_failed.json"))
+    expected_marker = dict(claim)
+    expected_marker["status"] = "prepare_failed"
+    assert claim["status"] == "preparing"
+    assert marker == expected_marker
     assert first.read_bytes() == b"first" and second.read_bytes() == b"second"
     backup_root = next((root / "workflow" / "backups").iterdir())
     assert (backup_root / "files" / "neutral" / "first").read_bytes() == b"first"
@@ -684,13 +702,14 @@ def test_directory_fsync_failure_preserves_claim_backup_and_target(
     from agent_workflow.transactions import engine
 
     failing_path = root / "workflow" / ("backups" if phase == "backup_parent" else "journals")
-    failed = False
+    matching_calls = 0
 
     def fail_once(path: Path) -> None:
-        nonlocal failed
-        if path == failing_path and not failed:
-            failed = True
-            raise OSError("directory fsync failure")
+        nonlocal matching_calls
+        if path == failing_path:
+            matching_calls += 1
+            if matching_calls == 2:
+                raise OSError("directory fsync failure")
 
     monkeypatch.setattr(engine, "_fsync_directory", fail_once, raising=False)
     with pytest.raises(OSError, match="directory fsync failure"):
@@ -698,7 +717,12 @@ def test_directory_fsync_failure_preserves_claim_backup_and_target(
 
     assert target.read_bytes() == b"before"
     claim_path = next((root / "workflow" / "staging").rglob("claim.json"))
-    assert engine._read_claim(claim_path)["status"] == "prepare_failed"
+    claim = engine._read_claim(claim_path)
+    marker = engine._read_claim(claim_path.with_name("prepare_failed.json"))
+    expected_marker = dict(claim)
+    expected_marker["status"] = "prepare_failed"
+    assert claim["status"] == "preparing"
+    assert marker == expected_marker
     backup_root = next((root / "workflow" / "backups").iterdir())
     assert (backup_root / "files" / "neutral" / "RULES.md").read_bytes() == b"before"
 
@@ -728,7 +752,182 @@ def test_initial_journal_close_cleanup_failure_keeps_publish_error(
 
     assert any("journal close cleanup failed" in note for note in error.value.__notes__)
     claim_path = next((root / "workflow" / "staging").rglob("claim.json"))
-    assert engine._read_claim(claim_path)["status"] == "prepare_failed"
+    claim = engine._read_claim(claim_path)
+    marker = engine._read_claim(claim_path.with_name("prepare_failed.json"))
+    expected_marker = dict(claim)
+    expected_marker["status"] = "prepare_failed"
+    assert claim["status"] == "preparing"
+    assert marker == expected_marker
     backup_root = next((root / "workflow" / "backups").iterdir())
+    assert (backup_root / "files" / "neutral" / "RULES.md").read_bytes() == b"before"
+    assert target.read_bytes() == b"before"
+
+
+def test_success_keeps_original_claim_bytes_and_identity(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / ".agents"
+    root.mkdir()
+    target = root / "RULES.md"
+    target.write_bytes(b"before")
+    from agent_workflow.transactions import engine
+
+    captured: dict[str, Any] = {}
+
+    def capture_claim(_journal_path: Path) -> None:
+        claim_path = next((root / "workflow" / "staging").rglob("claim.json"))
+        stat = claim_path.lstat()
+        captured.update(path=claim_path, raw=claim_path.read_bytes(), identity=(stat.st_dev, stat.st_ino))
+
+    monkeypatch.setattr(engine, "_after_initial_journal_sync", capture_claim)
+    apply_plan(make_plan(root, sha256_file(target)))
+
+    claim_path = captured["path"]
+    stat = claim_path.lstat()
+    assert claim_path.read_bytes() == captured["raw"]
+    assert (stat.st_dev, stat.st_ino) == captured["identity"]
+    assert engine._read_claim(claim_path)["status"] == "preparing"
+    assert not claim_path.with_name("prepare_failed.json").exists()
+
+
+def test_failure_keeps_original_claim_and_writes_exclusive_full_marker(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / ".agents"
+    root.mkdir()
+    target = root / "RULES.md"
+    target.write_bytes(b"before")
+    from agent_workflow.transactions import backup as backup_module
+    from agent_workflow.transactions import engine
+
+    real_create = backup_module.create_backup
+    captured: dict[str, Any] = {}
+    real_claim = engine._claim_transaction_namespace
+
+    def capture_namespace(*args: object, **kwargs: object) -> object:
+        claim = real_claim(*args, **kwargs)
+        captured["claim"] = claim
+        return claim
+
+    def capture_then_fail(*args: object, **kwargs: object) -> object:
+        real_create(*args, **kwargs)
+        claim_path = next((root / "workflow" / "staging").rglob("claim.json"))
+        stat = claim_path.lstat()
+        captured.update(path=claim_path, raw=claim_path.read_bytes(), identity=(stat.st_dev, stat.st_ino))
+        raise OSError("preparation failed")
+
+    monkeypatch.setattr(engine, "_claim_transaction_namespace", capture_namespace)
+    monkeypatch.setattr(backup_module, "create_backup", capture_then_fail)
+    with pytest.raises(OSError, match="preparation failed"):
+        apply_plan(make_plan(root, sha256_file(target)))
+
+    claim_path = captured["path"]
+    stat = claim_path.lstat()
+    assert claim_path.read_bytes() == captured["raw"]
+    assert (stat.st_dev, stat.st_ino) == captured["identity"]
+    claim = engine._read_claim(claim_path)
+    marker_path = claim_path.with_name("prepare_failed.json")
+    marker_raw = marker_path.read_bytes()
+    marker = engine._read_claim(marker_path)
+    expected_marker = dict(claim)
+    expected_marker["status"] = "prepare_failed"
+    assert claim["status"] == "preparing"
+    assert marker == expected_marker
+
+    with pytest.raises(BackupError):
+        engine._verify_namespace_claim(captured["claim"])
+    engine._verify_namespace_claim(captured["claim"], allow_prepare_failed=True)
+
+    with pytest.raises(BackupError):
+        engine._write_claim(captured["claim"], "prepare_failed")
+    assert marker_path.read_bytes() == marker_raw
+
+
+def test_internal_directory_fsyncs_new_path_and_parent_only(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_workflow.transactions import engine
+
+    path = tmp_path / "workflow"
+    calls: list[Path] = []
+    monkeypatch.setattr(engine, "_fsync_directory", calls.append)
+
+    assert engine._ensure_internal_directory(path) == path
+    assert calls == [path, path.parent]
+
+    calls.clear()
+    assert engine._ensure_internal_directory(path) == path
+    assert calls == []
+
+
+def test_apply_fsyncs_each_new_internal_directory_hierarchy(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / ".agents"
+    root.mkdir()
+    from agent_workflow.transactions import engine
+
+    calls: list[Path] = []
+    monkeypatch.setattr(engine, "_fsync_directory", calls.append)
+    apply_plan(make_plan(root, None))
+
+    workflow = root / "workflow"
+    assert calls[:8] == [
+        workflow,
+        root,
+        workflow / "backups",
+        workflow,
+        workflow / "staging",
+        workflow,
+        workflow / "journals",
+        workflow,
+    ]
+
+
+def test_fsync_failure_after_authoritative_journal_preserves_all_recovery_evidence(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / ".agents"
+    root.mkdir()
+    target = root / "RULES.md"
+    target.write_bytes(b"before")
+    from agent_workflow.transactions import engine
+
+    publication_synced = False
+    failed = False
+
+    def mark_publication_synced(_journal_path: Path) -> None:
+        nonlocal publication_synced
+        publication_synced = True
+
+    def fail_once_after_authority(path: Path) -> None:
+        nonlocal failed
+        if publication_synced and path.parent.name == "staging" and not failed:
+            failed = True
+            raise OSError("post-authoritative directory fsync failed")
+
+    monkeypatch.setattr(engine, "_after_initial_journal_sync", mark_publication_synced)
+    monkeypatch.setattr(engine, "_fsync_directory", fail_once_after_authority)
+
+    with pytest.raises(OSError, match="post-authoritative directory fsync failed"):
+        apply_plan(make_plan(root, sha256_file(target)))
+
+    claim_path = next((root / "workflow" / "staging").rglob("claim.json"))
+    claim = engine._read_claim(claim_path)
+    marker = engine._read_claim(claim_path.with_name("prepare_failed.json"))
+    expected_marker = dict(claim)
+    expected_marker["status"] = "prepare_failed"
+    journal_path = next((root / "workflow" / "journals").glob("*.json"))
+    journal = TransactionJournal.from_json(journal_path.read_text(encoding="utf-8"))
+    backup_root = next((root / "workflow" / "backups").iterdir())
+
+    assert claim["status"] == "preparing"
+    assert marker == expected_marker
+    assert journal.status == "prepared"
     assert (backup_root / "files" / "neutral" / "RULES.md").read_bytes() == b"before"
     assert target.read_bytes() == b"before"

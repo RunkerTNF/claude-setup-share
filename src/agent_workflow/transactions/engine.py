@@ -332,7 +332,13 @@ def _ensure_scope_root(scope_root: Path) -> None:
 def _ensure_internal_directory(path: Path) -> Path:
     if path.is_symlink():
         raise UnsafePathError(f"transaction storage is a symlink: {path}")
-    path.mkdir(exist_ok=True)
+    try:
+        path.mkdir()
+    except FileExistsError:
+        pass
+    else:
+        _fsync_directory(path)
+        _fsync_directory(path.parent)
     if not path.is_dir() or path.is_symlink():
         raise UnsafePathError(f"transaction storage is not a directory: {path}")
     return path
@@ -400,6 +406,7 @@ def _verify_namespace_claim(
     *,
     allow_apply: bool = False,
     allow_journal: bool = False,
+    allow_prepare_failed: bool = False,
     expected_status: str = "preparing",
 ) -> None:
     stat = claim.claim_path.lstat()
@@ -415,6 +422,14 @@ def _verify_namespace_claim(
     allowed = {claim.claim_path}
     if allow_apply:
         allowed.add(claim.staging_root / "apply")
+    if allow_prepare_failed:
+        marker_path = claim.staging_root / "prepare_failed.json"
+        marker = _read_claim(marker_path)
+        expected_marker = dict(claim.payload)
+        expected_marker["status"] = "prepare_failed"
+        if marker != expected_marker:
+            raise BackupError("invalid transaction preparation failure marker")
+        allowed.add(marker_path)
     if set(claim.staging_root.iterdir()) != allowed:
         raise BackupError("transaction namespace contains racing artifacts")
 
@@ -458,18 +473,25 @@ def _read_claim(path: Path) -> dict[str, object]:
 
 
 def _write_claim(claim: _NamespaceClaim, status: str) -> None:
-    _verify_namespace_claim(claim, allow_apply=(claim.staging_root / "apply").exists())
+    if status != "prepare_failed":
+        raise BackupError(f"unsupported transaction claim status: {status}")
+    allow_apply = (claim.staging_root / "apply").exists()
+    allow_journal = claim.journal_path.exists() or claim.journal_path.is_symlink()
+    _verify_namespace_claim(claim, allow_apply=allow_apply, allow_journal=allow_journal)
     payload = dict(claim.payload)
     payload["status"] = status
-    temporary = claim.staging_root.parent / f".{claim.staging_root.name}.claim.{uuid4()}.tmp"
-    try:
-        _write_fsynced(temporary, _claim_json(payload))
-        _read_claim(temporary)
-        _verify_namespace_claim(claim, allow_apply=(claim.staging_root / "apply").exists())
-        os.replace(temporary, claim.claim_path)
-        _fsync_directory(claim.staging_root)
-    finally:
-        temporary.unlink(missing_ok=True)
+    marker_path = claim.staging_root / "prepare_failed.json"
+    identity = _write_fsynced_identity(marker_path, _claim_json(payload))
+    stat = marker_path.lstat()
+    if identity != (stat.st_dev, stat.st_ino) or _read_claim(marker_path) != payload:
+        raise BackupError("invalid transaction preparation failure marker")
+    _verify_namespace_claim(
+        claim,
+        allow_apply=allow_apply,
+        allow_journal=allow_journal,
+        allow_prepare_failed=True,
+    )
+    _fsync_directory(claim.staging_root)
 
 
 def _publish_initial_journal(journal: TransactionJournal, claim: _NamespaceClaim) -> None:
@@ -507,7 +529,6 @@ def _publish_initial_journal(journal: TransactionJournal, claim: _NamespaceClaim
         if restored.to_json() != journal.to_json():
             raise BackupError("published journal validation failed")
         _verify_namespace_claim(claim, allow_apply=True, allow_journal=True)
-        claim.claim_path.unlink()
         _fsync_directory(claim.staging_root)
     except FileExistsError as error:
         raise BackupError(f"transaction namespace already exists: {claim.journal_path}") from error
@@ -517,13 +538,6 @@ def _publish_initial_journal(journal: TransactionJournal, claim: _NamespaceClaim
                 _close_initial_journal(output)
             except Exception as close_error:
                 original_error.add_note(f"initial journal close failed: {close_error}")
-        try:
-            stat = claim.journal_path.lstat()
-            if journal_identity == (stat.st_dev, stat.st_ino):
-                claim.journal_path.unlink()
-                _fsync_directory(claim.journal_path.parent)
-        except Exception as cleanup_error:
-            original_error.add_note(f"initial journal cleanup failed: {cleanup_error}")
         raise
 
 
