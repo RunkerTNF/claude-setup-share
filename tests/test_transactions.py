@@ -364,3 +364,45 @@ def test_lock_cleanup_failure_keeps_body_exception(tmp_path: Path, monkeypatch: 
     body_error = RuntimeError("body failure")
     lock.__exit__(RuntimeError, body_error, None)
     assert any("cleanup failed" in note for note in body_error.__notes__)
+
+
+def test_backup_tamper_after_staging_blocks_before_committing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    root = tmp_path / ".agents"; root.mkdir(); target = root / "RULES.md"; target.write_bytes(b"old")
+    from agent_workflow.transactions import engine
+    real_stage = engine._stage_writes
+    def stage_then_tamper(stage_root: Path, operations: object) -> object:
+        result = real_stage(stage_root, operations)
+        transaction_id = stage_root.parent.name
+        payload = next((root / "workflow" / "backups" / transaction_id / "files").rglob("*"))
+        while payload.is_dir(): payload = next(payload.iterdir())
+        payload.write_bytes(b"tampered")
+        return result
+    monkeypatch.setattr(engine, "_stage_writes", stage_then_tamper)
+    with pytest.raises(BackupError): apply_plan(make_plan(root, sha256_file(target)))
+    assert target.read_bytes() == b"old"
+
+
+def test_mixed_committing_journal_restores_all_entries(tmp_path: Path) -> None:
+    root = tmp_path / ".agents"; root.mkdir()
+    first, second = root / "first", root / "second"; first.write_bytes(b"one"); second.write_bytes(b"two")
+    plan = TransactionPlan.new(scope_root=str(root), target_roots={"neutral": str(root), "scope": str(tmp_path)}, allowed_roots=(str(tmp_path),), operations=(
+        WriteOperation.from_bytes("neutral", "first", b"ONE", sha256_file(first), Ownership.CANONICAL),
+        WriteOperation.from_bytes("neutral", "second", b"TWO", sha256_file(second), Ownership.CANONICAL),
+    ))
+    journal = apply_plan(plan); path = Path(journal.journal_path)
+    payload = json.loads(path.read_text()); payload["status"] = "committing"; path.write_text(json.dumps(payload))
+    first.write_bytes(b"one")
+    rollback_transaction(path)
+    assert first.read_bytes() == b"one" and second.read_bytes() == b"two"
+
+
+def test_lock_replacement_between_identity_and_token_check_survives(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    path = tmp_path / ".workflow.lock"; lock = ScopeLock(path); lock.__enter__()
+    original = type(path).read_text
+    def replace_then_read(item: Path, *args: object, **kwargs: object) -> str:
+        if item == path:
+            path.unlink(); path.write_text("replacement", encoding="utf-8")
+        return original(item, *args, **kwargs)
+    monkeypatch.setattr(type(path), "read_text", replace_then_read)
+    lock.__exit__(None, None, None)
+    assert path.read_text(encoding="utf-8") == "replacement"

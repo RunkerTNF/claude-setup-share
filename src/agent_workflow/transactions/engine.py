@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 import os
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Mapping, Sequence
 from uuid import uuid4
 
 from agent_workflow.errors import BackupError, ConflictError, SourceChangedError, UnsafePathError
@@ -160,8 +160,11 @@ def rollback_transaction(journal_path: Path) -> TransactionJournal:
         _write_journal(rolling_back)
         try:
             _restore_from_backup_entries(scope_root, staging_parent, journal.transaction_id, resolved, expected_backup_root, sources, journal.target_roots, journal.allowed_roots)
-        except Exception:
-            _write_journal(rolling_back.with_status("rollback_failed"))
+        except Exception as restore_error:
+            try:
+                _write_journal(rolling_back.with_status("rollback_failed"))
+            except Exception as journal_error:
+                restore_error.add_note(f"could not persist rollback_failed: {journal_error}")
             raise
         rolled_back = rolling_back.with_status("rolled_back")
         _write_journal(rolled_back)
@@ -322,8 +325,8 @@ def _restore_from_backup(
     operations: tuple[_ResolvedOperation, ...],
     backup_root: Path,
     sources: tuple[backup.BackupSource, ...],
-    target_roots: object,
-    allowed_roots: object,
+    target_roots: Mapping[str, str],
+    allowed_roots: Sequence[str],
 ) -> None:
     _assert_no_symlink_components(scope_root, ("workflow", "backups", transaction_id, "inventory.json"))
     _assert_no_symlink_components(scope_root, ("workflow", "staging"))
@@ -352,8 +355,8 @@ def _restore_from_backup_entries(
     resolved: tuple[tuple[JournalEntry, Path], ...],
     backup_root: Path,
     sources: tuple[backup.BackupSource, ...],
-    target_roots: object,
-    allowed_roots: object,
+    target_roots: Mapping[str, str],
+    allowed_roots: Sequence[str],
 ) -> None:
     inventory = backup.verify_backup(backup_root, sources)
     inventory_by_target = {(entry.root_id, entry.path): entry for entry in inventory}
@@ -374,7 +377,6 @@ def _restore_from_backup_entries(
             if entry.existed:
                 target.parent.mkdir(parents=True, exist_ok=True)
                 _revalidate_restore_entry(entry, target, target_roots, allowed_roots)
-                _revalidate_restore_entry(entry, target, target_roots, allowed_roots)
                 os.replace(staged[(entry.root_id, entry.path)], target)
             else:
                 _revalidate_restore_entry(entry, target, target_roots, allowed_roots)
@@ -389,9 +391,7 @@ def _restore_from_backup_entries(
         raise BackupError("rollback restoration incomplete: " + "; ".join(str(error) for error in failures))
 
 
-def _revalidate_restore_entry(entry: JournalEntry, approved_target: Path, target_roots: object, allowed_roots: object) -> None:
-    if not isinstance(target_roots, dict) and not hasattr(target_roots, "items"):
-        raise UnsafePathError("invalid trusted transaction roots")
+def _revalidate_restore_entry(entry: JournalEntry, approved_target: Path, target_roots: Mapping[str, str], allowed_roots: Sequence[str]) -> None:
     roots = {root_id: Path(path) for root_id, path in target_roots.items()}
     allowed = tuple(Path(path) for path in allowed_roots)
     target = resolve_write_target(entry.root_id, entry.path, roots, allowed)
