@@ -25,6 +25,65 @@ def test_portable_skill_accepts_standard_core_with_packaged_reference(tmp_path: 
     assert lint_skill(skill) == ()
 
 
+@pytest.mark.parametrize(
+    "target",
+    (
+        "references/checklist.md#checks",
+        "references/checklist.md?mode=compact",
+    ),
+)
+def test_markdown_local_target_ignores_fragment_and_query(
+    tmp_path: Path, target: str
+) -> None:
+    skill = tmp_path / "review"
+    write_skill(skill, f"See [checklist]({target}).")
+    reference = skill / "references" / "checklist.md"
+    reference.parent.mkdir()
+    reference.write_text("# Checks\n", encoding="utf-8")
+
+    assert lint_skill(skill) == ()
+
+
+@pytest.mark.parametrize(
+    "target",
+    (
+        "mailto:docs@example.com",
+        "custom-skill:checklist",
+        "custom+docs:references/checklist.md",
+    ),
+)
+def test_markdown_non_file_uri_is_external(tmp_path: Path, target: str) -> None:
+    skill = tmp_path / "review"
+    write_skill(skill, f"See [documentation]({target}).")
+
+    assert lint_skill(skill) == ()
+
+
+def test_markdown_file_uri_remains_unsafe(tmp_path: Path) -> None:
+    skill = tmp_path / "review"
+    write_skill(skill, "See [checklist](file:references/checklist.md).")
+    reference = skill / "references" / "checklist.md"
+    reference.parent.mkdir()
+    reference.write_text("# Checks\n", encoding="utf-8")
+
+    assert [item.code for item in lint_skill(skill)] == ["portable.reference-unsafe"]
+
+
+def test_markdown_windows_drive_path_remains_unsafe(tmp_path: Path) -> None:
+    skill = tmp_path / "review"
+    write_skill(skill, "See [checklist](C:/private/checklist.md).")
+
+    assert [item.code for item in lint_skill(skill)] == ["portable.reference-unsafe"]
+
+
+def test_percent_encoded_traversal_does_not_resolve_outside_skill(tmp_path: Path) -> None:
+    skill = tmp_path / "review"
+    write_skill(skill, "See [secret](references/%2e%2e/secret.md).")
+    (tmp_path / "secret.md").write_text("outside\n", encoding="utf-8")
+
+    assert [item.code for item in lint_skill(skill)] == ["portable.reference-missing"]
+
+
 def test_portable_skill_accepts_bare_packaged_reference(tmp_path: Path) -> None:
     skill = tmp_path / "review"
     write_skill(skill, "Read checklist.md.")

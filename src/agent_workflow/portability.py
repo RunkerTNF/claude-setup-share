@@ -13,6 +13,8 @@ from .model import Severity, normalize_relative_path
 _FRONTMATTER_FIELD = re.compile(r"^([A-Za-z][A-Za-z0-9_-]*):[ \t]*(.*?)$")
 _SKILL_NAME = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 _MARKDOWN_LINK = re.compile(r"\]\(([^)\s]+)(?:\s+[^)]*)?\)")
+_URI_SCHEME = re.compile(r"^(?P<scheme>[A-Za-z][A-Za-z0-9+.-]*):")
+_WINDOWS_DRIVE = re.compile(r"^[A-Za-z]:")
 _FILE_REFERENCE = re.compile(
     r"(?<![\w.$-])(?P<reference>(?:(?:\.\.?|[A-Za-z]:)?[\\/])?(?:[\w.-]+[\\/])+[\w.-]+\.[A-Za-z0-9]+)"
 )
@@ -180,11 +182,16 @@ def _scan_references(
 
 def _references(text: str) -> tuple[str, ...]:
     found: set[str] = set()
+    markdown_target_spans: list[tuple[int, int]] = []
     for match in _MARKDOWN_LINK.finditer(text):
+        markdown_target_spans.append(match.span(1))
         candidate = match.group(1).strip().strip("<>")
-        if candidate and not _is_external(candidate):
-            found.add(candidate)
+        local_reference = _markdown_local_reference(candidate)
+        if local_reference is not None:
+            found.add(local_reference)
     for match in _FILE_REFERENCE.finditer(text):
+        if _inside_markdown_target(match, markdown_target_spans):
+            continue
         candidate = match.group("reference").strip().rstrip(".,;:!?")
         if (
             candidate
@@ -194,6 +201,8 @@ def _references(text: str) -> tuple[str, ...]:
         ):
             found.add(candidate)
     for match in _BARE_FILE_REFERENCE.finditer(text):
+        if _inside_markdown_target(match, markdown_target_spans):
+            continue
         candidate = match.group("reference")
         if _looks_like_bare_reference(text, match.start()):
             found.add(candidate)
@@ -201,7 +210,28 @@ def _references(text: str) -> tuple[str, ...]:
 
 
 def _is_external(reference: str) -> bool:
-    return re.match(r"^[A-Za-z][A-Za-z0-9+.-]*://", reference) is not None or reference.startswith("#")
+    if reference.startswith(("#", "?")):
+        return True
+    scheme = _URI_SCHEME.match(reference)
+    return (
+        scheme is not None
+        and scheme.group("scheme").casefold() != "file"
+        and _WINDOWS_DRIVE.match(reference) is None
+    )
+
+
+def _markdown_local_reference(target: str) -> str | None:
+    if not target or _is_external(target):
+        return None
+    path = target.split("#", 1)[0].split("?", 1)[0]
+    return path or None
+
+
+def _inside_markdown_target(
+    match: re.Match[str], target_spans: list[tuple[int, int]]
+) -> bool:
+    start, end = match.span()
+    return any(start >= target_start and end <= target_end for target_start, target_end in target_spans)
 
 
 def _is_vendor_path(reference: str) -> bool:
