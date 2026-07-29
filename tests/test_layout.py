@@ -209,7 +209,10 @@ def test_resource_loader_rejects_unsafe_paths(path: str) -> None:
 
 
 def test_resource_loader_reads_source_checkout_template() -> None:
-    assert load_bundled_resource("templates/core/global-rules.md")
+    content = load_bundled_resource("templates/core/global-rules.md")
+
+    assert content
+    assert b"\r\n" not in content
 
 
 def test_wheel_template_mirrors_match_canonical_sources() -> None:

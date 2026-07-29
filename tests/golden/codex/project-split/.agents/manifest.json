@@ -1,0 +1,16 @@
+{
+  "bootstrap_root": null,
+  "generated_files": {
+    "neutral:RULES.md": "0b61bce3e563bcb9ec436e601cec41f3d9a3f9710095357057013b2e1d251e8c",
+    "neutral:memory/MEMORY.md": "f8a3136b1ba17cb2c0cb62cb7178fadfa67517d4fa511acd0647f949dd0fe85a",
+    "neutral:sessions/.gitkeep": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "scope:AGENTS.md": "1acc394f4ec3970a3e68ccc07a36005101003374f508e00587a3c42b32f093a6"
+  },
+  "generator_version": "0.1.0",
+  "profile": "split",
+  "schema_version": 1,
+  "scope": "project",
+  "targets": [
+    "codex"
+  ]
+}

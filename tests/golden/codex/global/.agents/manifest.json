@@ -1,0 +1,18 @@
+{
+  "bootstrap_root": null,
+  "generated_files": {
+    "neutral:RULES.md": "c1ff501e106257d956fc72172d90bd75e7b830d3655cba1651f91cabd3a33149",
+    "neutral:memory/MEMORY.md": "8c4f1fbee8471f84ef41df05b2926582df598ea8e8dc1d5b30a3e4c67a5a3a5a",
+    "neutral:skills/agent-workflow-setup/SKILL.md": "81434362729e6dd1d42faf42e529f5d212d3b09294e5f508cfb12886b8228ef3",
+    "neutral:skills/agent-workflow-setup/references/flow.md": "9a0cb501b4d1a84f0e70feed8aa787b0122438701c15e65048b2c8c0b3138a0c",
+    "neutral:workflow/agent-workflow.pyz": "f69c5b840107911b437176208cde605093156c3a94d9e784e0689bba4423ea43",
+    "scope:.codex/AGENTS.md": "c99d5cce88a6749385b6d6a397aff8fdd19c9765f10812f220cb6fc92ab42b0d"
+  },
+  "generator_version": "0.1.0",
+  "profile": null,
+  "schema_version": 1,
+  "scope": "global",
+  "targets": [
+    "codex"
+  ]
+}

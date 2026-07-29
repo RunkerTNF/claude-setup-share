@@ -9,6 +9,7 @@ from .manifest import WorkflowManifest
 from .model import Ownership, ProjectProfile, Scope
 from .paths import HostPaths, resolve_write_target
 from .plan import TransactionPlan, WriteOperation
+from .profiles import plan_profile_files
 from .resources import bundled_resource_source, load_bundled_resource
 
 
@@ -28,6 +29,8 @@ def plan_neutral_init(
     scope: Scope,
     profile: ProjectProfile | None,
     targets: tuple[str, ...],
+    *,
+    manage_syncprotect: bool = False,
 ) -> TransactionPlan:
     """Return a read-only, deterministic plan for a neutral agent workflow."""
     _validate_scope(scope, profile)
@@ -65,6 +68,16 @@ def plan_neutral_init(
                 content=content,
                 expected_sha256=snapshot.sha256,
                 ownership=ownership,
+            )
+        )
+
+    if scope is Scope.PROJECT:
+        assert profile is not None
+        operations.extend(
+            plan_profile_files(
+                scope_base,
+                profile,
+                manage_syncprotect=manage_syncprotect,
             )
         )
 

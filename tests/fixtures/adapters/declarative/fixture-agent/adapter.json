@@ -1,0 +1,64 @@
+{
+  "schema_version": 1,
+  "id": "fixture-agent",
+  "display_name": "Fixture Agent",
+  "executables": [
+    "fixture-agent"
+  ],
+  "version_args": [
+    "--version"
+  ],
+  "supported_versions": [],
+  "global": {
+    "discovery_paths": [
+      ".fixture-agent/PROJECT.md"
+    ],
+    "instruction_entrypoints": [
+      {
+        "target": ".fixture-agent/PROJECT.md",
+        "template": "templates/project.md",
+        "profiles": []
+      }
+    ],
+    "skill_locations": [
+      {
+        "path": ".agents/skills",
+        "mode": "direct"
+      }
+    ]
+  },
+  "project": {
+    "discovery_paths": [
+      "FIXTURE.md"
+    ],
+    "instruction_entrypoints": [
+      {
+        "target": "FIXTURE.md",
+        "template": "templates/project.md",
+        "profiles": [
+          "local",
+          "shared",
+          "split"
+        ]
+      }
+    ],
+    "skill_locations": [
+      {
+        "path": ".agents/skills",
+        "mode": "direct"
+      }
+    ]
+  },
+  "capabilities": {
+    "skills": "supported"
+  },
+  "sensitive_keys": [
+    "api_key"
+  ],
+  "validation": [
+    ".fixture-agent/PROJECT.md"
+  ],
+  "smoke": [
+    "Open a fresh fixture-agent session."
+  ]
+}

@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import hashlib
 import os
 from pathlib import Path
 
+from .hashing import sha256_bytes, sha256_runtime_normalized
 from .manifest import WorkflowManifest
 from .model import Severity, normalize_relative_path
 
@@ -28,7 +28,10 @@ class Diagnostic:
     message: str
 
 
-def run_doctor(scope_root: Path) -> tuple[Diagnostic, ...]:
+def run_doctor(
+    scope_root: Path,
+    registry: object | None = None,
+) -> tuple[Diagnostic, ...]:
     """Inspect an installed scope without raising or changing its filesystem state."""
     root = Path(scope_root)
     diagnostics: list[Diagnostic] = []
@@ -44,7 +47,89 @@ def run_doctor(scope_root: Path) -> tuple[Diagnostic, ...]:
     _check_required_core(root, diagnostics)
     _lint_skills(root, diagnostics)
     _scan_bootstrap_dependencies(root, manifest, diagnostics)
+    _validate_selected_adapters(root, manifest, registry, diagnostics)
     return _ordered(diagnostics)
+
+
+def _validate_selected_adapters(
+    root: Path,
+    manifest: WorkflowManifest,
+    registry: object | None,
+    diagnostics: list[Diagnostic],
+) -> None:
+    from .adapters.base import AdapterContext
+    from .adapters.registry import AdapterRegistry, builtin_registry
+
+    selected_registry: AdapterRegistry
+    if registry is not None:
+        if not isinstance(registry, AdapterRegistry):
+            diagnostics.append(
+                Diagnostic(
+                    Severity.WARNING,
+                    "adapter.registry-invalid",
+                    "manifest.json",
+                    "adapter registry is unavailable",
+                )
+            )
+            return
+        selected_registry = registry
+    else:
+        managed = root / "workflow" / "adapters"
+        try:
+            external = (
+                AdapterRegistry.from_directories((managed,))
+                if managed.is_dir() and not managed.is_symlink()
+                else AdapterRegistry.from_pairs(())
+            )
+            selected_registry = AdapterRegistry.combine(
+                (builtin_registry(), external)
+            )
+        except (OSError, UnicodeError, ValueError) as error:
+            diagnostics.append(
+                Diagnostic(
+                    Severity.WARNING,
+                    "adapter.registry-invalid",
+                    "workflow/adapters",
+                    f"managed adapter registry is invalid: {error}",
+                )
+            )
+            selected_registry = builtin_registry()
+
+    project_root = (
+        root.parent if manifest.scope.value == "project" else None
+    )
+    context = AdapterContext(
+        home=root.parent,
+        project_root=project_root,
+        neutral_root=root,
+        scope=manifest.scope,
+        profile=manifest.profile,
+        generator_version=manifest.generator_version,
+    )
+    for adapter_id in manifest.targets:
+        try:
+            adapter = selected_registry.require((adapter_id,))[0]
+        except ValueError as error:
+            diagnostics.append(
+                Diagnostic(
+                    Severity.WARNING,
+                    "adapter.unavailable",
+                    adapter_id,
+                    str(error),
+                )
+            )
+            continue
+        try:
+            diagnostics.extend(adapter.validate(context))
+        except Exception as error:
+            diagnostics.append(
+                Diagnostic(
+                    Severity.WARNING,
+                    "adapter.validation-error",
+                    adapter_id,
+                    f"adapter validation failed: {type(error).__name__}",
+                )
+            )
 
 
 def _load_manifest(root: Path, diagnostics: list[Diagnostic]) -> WorkflowManifest | None:
@@ -87,11 +172,27 @@ def _check_generated(root: Path, manifest: WorkflowManifest, diagnostics: list[D
             diagnostics.append(_diagnostic(code, key, "missing or unsafe managed file"))
             continue
         try:
-            actual_digest = _sha256_regular_file(target)
+            content = target.read_bytes()
+            actual_digests = {
+                sha256_bytes(content),
+                sha256_runtime_normalized(
+                    content,
+                    home=(
+                        root.parent
+                        if manifest.scope.value == "global"
+                        else None
+                    ),
+                    project=(
+                        root.parent
+                        if manifest.scope.value == "project"
+                        else None
+                    ),
+                ),
+            }
         except OSError:
             diagnostics.append(_diagnostic("generated.path", key, "cannot read managed file safely"))
             continue
-        if actual_digest != expected_digest:
+        if expected_digest not in actual_digests:
             diagnostics.append(_diagnostic("generated.drift", key, "managed file hash differs from manifest"))
 
 
@@ -236,14 +337,6 @@ def _has_symlink_component(path: Path, root: Path) -> bool:
         if cursor.is_symlink():
             return True
     return False
-
-
-def _sha256_regular_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as file:
-        for chunk in iter(lambda: file.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
 
 
 def _normalize_for_scan(value: str) -> str:

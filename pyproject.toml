@@ -18,7 +18,11 @@ agent-workflow = "agent_workflow.cli:main"
 package-dir = {"" = "src"}
 
 [tool.setuptools.package-data]
-agent_workflow = ["_bundled/templates/core/*.md"]
+agent_workflow = [
+    "_bundled/templates/core/*.md",
+    "adapters/*/adapter.json",
+    "adapters/*/templates/*.md",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -233,3 +233,39 @@ def test_doctor_lints_children_in_order_and_does_not_mutate_state(tmp_path: Path
     assert {item.code for item in first} == {"portable.frontmatter", "skills.invalid-entry"}
     after = {path.relative_to(root): path.read_bytes() for path in root.rglob("*") if path.is_file()}
     assert after == before
+
+
+def test_doctor_warns_when_selected_adapter_is_unavailable(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / ".agents"
+    write_manifest(root, generated_files={})
+    payload = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
+    payload["targets"] = ["missing-agent"]
+    (root / "manifest.json").write_text(json.dumps(payload), encoding="utf-8")
+    write_core(root)
+
+    diagnostics = run_doctor(root)
+
+    unavailable = next(
+        item for item in diagnostics if item.code == "adapter.unavailable"
+    )
+    assert unavailable.severity is Severity.WARNING
+
+
+def test_doctor_validates_selected_builtin_entrypoint(tmp_path: Path) -> None:
+    root = tmp_path / ".agents"
+    write_manifest(root, generated_files={})
+    payload = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
+    payload["targets"] = ["codex"]
+    (root / "manifest.json").write_text(json.dumps(payload), encoding="utf-8")
+    write_core(root)
+
+    diagnostics = run_doctor(root)
+
+    missing = next(
+        item
+        for item in diagnostics
+        if item.code == "adapter.entrypoint-missing"
+    )
+    assert missing.severity is Severity.CONFLICT

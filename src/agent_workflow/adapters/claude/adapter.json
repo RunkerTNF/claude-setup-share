@@ -1,0 +1,78 @@
+{
+  "schema_version": 1,
+  "id": "claude",
+  "display_name": "Claude Code",
+  "executables": [
+    "claude"
+  ],
+  "version_args": [
+    "--version"
+  ],
+  "supported_versions": [],
+  "global": {
+    "discovery_paths": [
+      ".claude/CLAUDE.md"
+    ],
+    "instruction_entrypoints": [
+      {
+        "target": ".claude/CLAUDE.md",
+        "template": "templates/global-claude.md",
+        "profiles": []
+      }
+    ],
+    "skill_locations": [
+      {
+        "path": ".claude/skills",
+        "mode": "wrapper"
+      }
+    ]
+  },
+  "project": {
+    "discovery_paths": [
+      "CLAUDE.local.md",
+      "CLAUDE.md"
+    ],
+    "instruction_entrypoints": [
+      {
+        "target": "CLAUDE.local.md",
+        "template": "templates/project-claude-local.md",
+        "profiles": [
+          "local"
+        ]
+      },
+      {
+        "target": "CLAUDE.md",
+        "template": "templates/project-claude.md",
+        "profiles": [
+          "shared",
+          "split"
+        ]
+      }
+    ],
+    "skill_locations": [
+      {
+        "path": ".claude/skills",
+        "mode": "wrapper"
+      }
+    ]
+  },
+  "capabilities": {
+    "commands": "supported",
+    "hooks": "supported",
+    "mcp": "supported",
+    "permissions": "supported",
+    "rules": "supported",
+    "skills": "supported",
+    "subagents": "supported"
+  },
+  "sensitive_keys": [
+    "api_key",
+    "auth_token",
+    "http_headers"
+  ],
+  "validation": [],
+  "smoke": [
+    "Open a fresh Claude Code session.",
+    "Verify imported rules and native skill wrappers are available."
+  ]
+}
