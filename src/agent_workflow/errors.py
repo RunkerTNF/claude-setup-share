@@ -20,5 +20,10 @@ class BackupError(AgentWorkflowError):
     pass
 
 
+class ConflictError(AgentWorkflowError):
+    def __init__(self, message: str) -> None:
+        super().__init__(message, exit_code=3)
+
+
 class TransactionBusyError(AgentWorkflowError):
     pass
