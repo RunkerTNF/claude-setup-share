@@ -160,6 +160,44 @@ def test_doctor_detects_bootstrap_reference_in_generated_scope_file(tmp_path: Pa
     assert [item.code for item in run_doctor(root)] == ["bootstrap.reference"]
 
 
+def test_doctor_detects_bootstrap_reference_in_extensionless_generated_scope_file(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / ".agents"
+    bootstrap = str(tmp_path / "disposable-bootstrap")
+    entry = tmp_path / "INSTRUCTIONS"
+    entry.write_text(bootstrap, encoding="utf-8")
+    write_manifest(
+        root,
+        generated_files={"scope:INSTRUCTIONS": sha256(bootstrap)},
+        bootstrap_root=bootstrap,
+    )
+    write_core(root)
+
+    assert [item.code for item in run_doctor(root)] == ["bootstrap.reference"]
+
+
+def test_doctor_skips_oversized_file_without_full_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / ".agents"
+    bootstrap = str(tmp_path / "disposable-bootstrap")
+    write_manifest(root, generated_files={}, bootstrap_root=bootstrap)
+    write_core(root)
+    oversized = root / "oversized.md"
+    oversized.write_bytes(b"x" * (1024 * 1024 + 1))
+    original_read_bytes = Path.read_bytes
+
+    def fail_if_oversized(path: Path) -> bytes:
+        if path == oversized:
+            raise AssertionError("oversized file must not be fully read")
+        return original_read_bytes(path)
+
+    monkeypatch.setattr(Path, "read_bytes", fail_if_oversized)
+
+    assert run_doctor(root) == ()
+
+
 def test_doctor_reports_escaping_managed_symlink_without_reading_it(tmp_path: Path) -> None:
     root = tmp_path / ".agents"
     root.mkdir()

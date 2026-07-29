@@ -12,7 +12,6 @@ from .model import Severity, normalize_relative_path
 
 
 _MAX_TEXT_BYTES = 1024 * 1024
-_TEXT_SUFFIXES = frozenset({".md", ".markdown", ".txt", ".json", ".py", ".toml", ".yaml", ".yml", ".ini", ".lock"})
 _TRANSACTION_STORAGE_PREFIXES = (
     ("workflow", "backups"),
     ("workflow", "journals"),
@@ -136,29 +135,20 @@ def _scan_bootstrap_dependencies(
     if not needle:
         return
     candidates: dict[str, Path] = {
-        _relative(path, root): path for path in _bounded_text_files(root)
+        _relative(path, root): path for path in _bounded_safe_files(root)
     }
     target_roots = {"neutral": root, "scope": root.parent}
     for key in manifest.generated_files:
         root_id, relative_path = key.split(":", 1)
         candidate = target_roots[root_id].joinpath(*relative_path.split("/"))
-        if candidate.suffix.casefold() in _TEXT_SUFFIXES and _safe_file(
-            candidate, target_roots[root_id]
-        ) and candidate not in candidates.values():
+        if _safe_file(candidate, target_roots[root_id]) and candidate not in candidates.values():
             candidates.setdefault(key, candidate)
     for display_path, path in sorted(candidates.items(), key=lambda item: item[0].casefold()):
         relative = _relative(path, root) if _is_within(path, root) else display_path
         if relative == "manifest.json" or _excluded_from_bootstrap_scan(relative):
             continue
-        try:
-            content = path.read_bytes()
-        except OSError:
-            continue
-        if len(content) > _MAX_TEXT_BYTES:
-            continue
-        try:
-            text = content.decode("utf-8")
-        except UnicodeDecodeError:
+        text = _read_bounded_utf8(path)
+        if text is None:
             continue
         if needle in _normalize_for_scan(text):
             diagnostics.append(
@@ -166,7 +156,7 @@ def _scan_bootstrap_dependencies(
             )
 
 
-def _bounded_text_files(root: Path):
+def _bounded_safe_files(root: Path):
     for directory, names, filenames in os.walk(root, topdown=True, followlinks=False):
         current = Path(directory)
         safe_names: list[str] = []
@@ -179,10 +169,26 @@ def _bounded_text_files(root: Path):
         names[:] = safe_names
         for name in sorted(filenames, key=str.casefold):
             path = current / name
-            if path.suffix.casefold() not in _TEXT_SUFFIXES or path.is_symlink():
+            if path.is_symlink():
                 continue
             if _safe_file(path, root):
                 yield path
+
+
+def _read_bounded_utf8(path: Path) -> str | None:
+    try:
+        if path.stat().st_size > _MAX_TEXT_BYTES:
+            return None
+        with path.open("rb") as file:
+            content = file.read(_MAX_TEXT_BYTES + 1)
+    except OSError:
+        return None
+    if len(content) > _MAX_TEXT_BYTES:
+        return None
+    try:
+        return content.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
 
 
 def _excluded_from_bootstrap_scan(relative_path: str) -> bool:
