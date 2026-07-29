@@ -107,7 +107,7 @@ def apply_plan(plan: TransactionPlan) -> TransactionJournal:
                 except Exception as recovery_error:
                     original_error.add_note(f"could not persist rolling_back: {recovery_error}")
                 try:
-                    _restore_from_backup(scope_root, staging_parent, transaction_id, resolved_operations, backup_root, sources)
+                    _restore_from_backup(scope_root, staging_parent, transaction_id, resolved_operations, backup_root, sources, plan.target_roots, plan.allowed_roots)
                 except Exception as cleanup_error:
                     original_error.add_note(f"rollback cleanup failed: {cleanup_error}")
                     try:
@@ -159,7 +159,7 @@ def rollback_transaction(journal_path: Path) -> TransactionJournal:
         rolling_back = journal.with_status("rolling_back")
         _write_journal(rolling_back)
         try:
-            _restore_from_backup_entries(scope_root, staging_parent, journal.transaction_id, resolved, expected_backup_root, sources)
+            _restore_from_backup_entries(scope_root, staging_parent, journal.transaction_id, resolved, expected_backup_root, sources, journal.target_roots, journal.allowed_roots)
         except Exception:
             _write_journal(rolling_back.with_status("rollback_failed"))
             raise
@@ -322,7 +322,12 @@ def _restore_from_backup(
     operations: tuple[_ResolvedOperation, ...],
     backup_root: Path,
     sources: tuple[backup.BackupSource, ...],
+    target_roots: object,
+    allowed_roots: object,
 ) -> None:
+    _assert_no_symlink_components(scope_root, ("workflow", "backups", transaction_id, "inventory.json"))
+    _assert_no_symlink_components(scope_root, ("workflow", "staging"))
+    _assert_no_symlink_components(scope_root, ("workflow", "journals"))
     resolved = tuple(
         (
             JournalEntry(
@@ -337,7 +342,7 @@ def _restore_from_backup(
         )
         for item in operations
     )
-    _restore_from_backup_entries(scope_root, staging_parent, transaction_id, resolved, backup_root, sources)
+    _restore_from_backup_entries(scope_root, staging_parent, transaction_id, resolved, backup_root, sources, target_roots, allowed_roots)
 
 
 def _restore_from_backup_entries(
@@ -347,6 +352,8 @@ def _restore_from_backup_entries(
     resolved: tuple[tuple[JournalEntry, Path], ...],
     backup_root: Path,
     sources: tuple[backup.BackupSource, ...],
+    target_roots: object,
+    allowed_roots: object,
 ) -> None:
     inventory = backup.verify_backup(backup_root, sources)
     inventory_by_target = {(entry.root_id, entry.path): entry for entry in inventory}
@@ -363,10 +370,14 @@ def _restore_from_backup_entries(
     failures: list[Exception] = []
     for entry, target in resolved:
         try:
+            _revalidate_restore_entry(entry, target, target_roots, allowed_roots)
             if entry.existed:
                 target.parent.mkdir(parents=True, exist_ok=True)
+                _revalidate_restore_entry(entry, target, target_roots, allowed_roots)
+                _revalidate_restore_entry(entry, target, target_roots, allowed_roots)
                 os.replace(staged[(entry.root_id, entry.path)], target)
             else:
+                _revalidate_restore_entry(entry, target, target_roots, allowed_roots)
                 if target.exists() or target.is_symlink():
                     if target.is_dir():
                         raise BackupError(f"cannot remove unexpected directory during rollback: {target}")
@@ -376,6 +387,20 @@ def _restore_from_backup_entries(
             failures.append(error)
     if failures:
         raise BackupError("rollback restoration incomplete: " + "; ".join(str(error) for error in failures))
+
+
+def _revalidate_restore_entry(entry: JournalEntry, approved_target: Path, target_roots: object, allowed_roots: object) -> None:
+    if not isinstance(target_roots, dict) and not hasattr(target_roots, "items"):
+        raise UnsafePathError("invalid trusted transaction roots")
+    roots = {root_id: Path(path) for root_id, path in target_roots.items()}
+    allowed = tuple(Path(path) for path in allowed_roots)
+    target = resolve_write_target(entry.root_id, entry.path, roots, allowed)
+    _reject_target_symlinks(roots[entry.root_id], entry.path)
+    if target != approved_target:
+        raise UnsafePathError(f"restore target changed after approval: {approved_target}")
+    current = _safe_sha256(target)
+    if current not in {entry.before_sha256, entry.after_sha256}:
+        raise SourceChangedError(f"restore refused due to drift: {target}")
 
 
 def _target_root_for_entry(entry: JournalEntry, resolved: tuple[tuple[JournalEntry, Path], ...]) -> Path:

@@ -329,3 +329,38 @@ def test_manual_rollback_resumes_committing_journal(tmp_path: Path) -> None:
     path.write_text(json.dumps(payload), encoding="utf-8")
     rollback_transaction(path)
     assert rules.read_bytes() == b"old"
+
+
+def test_manual_restore_rejects_parent_symlink_swap_and_later_resumes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    root, outside = tmp_path / ".agents", tmp_path / "outside"
+    nested = root / "nested"; nested.mkdir(parents=True); outside.mkdir()
+    target = nested / "file"; target.write_bytes(b"before")
+    operation = WriteOperation.from_bytes("neutral", "nested/file", b"after", sha256_file(target), Ownership.CANONICAL)
+    plan = TransactionPlan.new(scope_root=str(root), target_roots={"neutral": str(root), "scope": str(tmp_path)}, allowed_roots=(str(tmp_path),), operations=(operation,))
+    journal = apply_plan(plan)
+    from agent_workflow.transactions import engine
+    real_stage = engine._create_stage_root
+    def stage_then_attack(parent: Path, transaction_id: str, label: str) -> Path:
+        result = real_stage(parent, transaction_id, label)
+        if label.startswith("restore-"):
+            shutil.rmtree(nested)
+            try: nested.symlink_to(outside, target_is_directory=True)
+            except OSError: pytest.skip("symlink creation unavailable")
+        return result
+    monkeypatch.setattr(engine, "_create_stage_root", stage_then_attack)
+    with pytest.raises(BackupError):
+        rollback_transaction(Path(journal.journal_path))
+    assert not (outside / "file").exists()
+    nested.unlink(); nested.mkdir(); target.write_bytes(b"after")
+    monkeypatch.setattr(engine, "_create_stage_root", real_stage)
+    rollback_transaction(Path(journal.journal_path))
+    assert target.read_bytes() == b"before"
+
+
+def test_lock_cleanup_failure_keeps_body_exception(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    lock = ScopeLock(tmp_path / ".workflow.lock")
+    lock.__enter__()
+    monkeypatch.setattr(type(lock.path), "lstat", lambda _self: (_ for _ in ()).throw(OSError("cleanup failed")))
+    body_error = RuntimeError("body failure")
+    lock.__exit__(RuntimeError, body_error, None)
+    assert any("cleanup failed" in note for note in body_error.__notes__)
