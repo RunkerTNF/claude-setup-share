@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from ..base import AdapterContext, InventoryRoot
 from ..manifest import AdapterManifest
 from ..rendered import GeneratedEntrypointAdapter
+from .migration import codex_inventory_roots
 
 
 class CodexAdapter(GeneratedEntrypointAdapter):
@@ -18,6 +20,11 @@ class CodexAdapter(GeneratedEntrypointAdapter):
             manifest=manifest,
             package_root=package_root,
         )
+
+    def inventory_roots(
+        self, context: AdapterContext
+    ) -> tuple[InventoryRoot, ...]:
+        return codex_inventory_roots(context, self.manifest)
 
 
 def create_adapter(

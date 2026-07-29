@@ -25,6 +25,45 @@
         "path": ".agents/skills",
         "mode": "direct"
       }
+    ],
+    "inventory_roots": [
+      {
+        "path": ".agents/skills",
+        "kind": "skill",
+        "recursive": true,
+        "include_globs": [
+          "**/*"
+        ]
+      },
+      {
+        "path": ".codex/AGENTS.md",
+        "kind": "rules",
+        "recursive": false,
+        "include_globs": []
+      },
+      {
+        "path": ".codex/config.toml",
+        "kind": "settings",
+        "recursive": false,
+        "include_globs": []
+      },
+      {
+        "path": ".codex/memory",
+        "kind": "manual_memory",
+        "recursive": true,
+        "include_globs": [
+          "*.md",
+          "**/*.md"
+        ]
+      },
+      {
+        "path": ".codex/skills",
+        "kind": "skill",
+        "recursive": true,
+        "include_globs": [
+          "**/*"
+        ]
+      }
     ]
   },
   "project": {
@@ -53,6 +92,51 @@
       {
         "path": ".agents/skills",
         "mode": "direct"
+      }
+    ],
+    "inventory_roots": [
+      {
+        "path": ".agents/skills",
+        "kind": "skill",
+        "recursive": true,
+        "include_globs": [
+          "**/*"
+        ]
+      },
+      {
+        "path": ".codex/config.toml",
+        "kind": "settings",
+        "recursive": false,
+        "include_globs": []
+      },
+      {
+        "path": ".codex/memory",
+        "kind": "manual_memory",
+        "recursive": true,
+        "include_globs": [
+          "*.md",
+          "**/*.md"
+        ]
+      },
+      {
+        "path": ".codex/skills",
+        "kind": "skill",
+        "recursive": true,
+        "include_globs": [
+          "**/*"
+        ]
+      },
+      {
+        "path": "AGENTS.md",
+        "kind": "rules",
+        "recursive": false,
+        "include_globs": []
+      },
+      {
+        "path": "AGENTS.override.md",
+        "kind": "rules",
+        "recursive": false,
+        "include_globs": []
       }
     ]
   },

@@ -5,9 +5,10 @@ from typing import Mapping
 
 from agent_workflow.model import Scope
 
-from ..base import AdapterContext
+from ..base import AdapterContext, InventoryRoot
 from ..manifest import AdapterManifest
 from ..rendered import GeneratedEntrypointAdapter
+from .migration import claude_inventory_roots
 
 
 class ClaudeAdapter(GeneratedEntrypointAdapter):
@@ -42,6 +43,11 @@ class ClaudeAdapter(GeneratedEntrypointAdapter):
             "OVERLAY_IMPORT": overlay,
             "MEMORY_IMPORT": f"@{neutral}/memory/MEMORY.md",
         }
+
+    def inventory_roots(
+        self, context: AdapterContext
+    ) -> tuple[InventoryRoot, ...]:
+        return claude_inventory_roots(context, self.manifest)
 
 
 def create_adapter(

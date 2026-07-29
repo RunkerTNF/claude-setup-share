@@ -34,6 +34,38 @@ class AdapterDetection:
 
 
 @dataclass(frozen=True)
+class InventoryRoot:
+    kind: str
+    scope: Scope
+    path: Path
+    recursive: bool
+    include_globs: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.kind, str) or not self.kind:
+            raise ValueError("inventory root kind must be non-empty")
+        if not isinstance(self.scope, Scope):
+            raise ValueError("inventory root scope must be valid")
+        path = Path(self.path)
+        if not path.is_absolute():
+            raise ValueError("inventory root path must be absolute")
+        if type(self.recursive) is not bool:
+            raise ValueError("inventory root recursive must be boolean")
+        globs = tuple(self.include_globs)
+        if any(
+            not isinstance(pattern, str)
+            or not pattern
+            or "\x00" in pattern
+            or pattern.startswith(("/", "\\"))
+            or ".." in pattern.replace("\\", "/").split("/")
+            for pattern in globs
+        ):
+            raise ValueError("inventory root globs must be safe")
+        object.__setattr__(self, "path", path)
+        object.__setattr__(self, "include_globs", globs)
+
+
+@dataclass(frozen=True)
 class AdapterContext:
     home: Path
     project_root: Path | None
@@ -75,4 +107,9 @@ class AgentAdapter(Protocol):
         raise NotImplementedError
 
     def validate(self, context: AdapterContext) -> tuple[Diagnostic, ...]:
+        raise NotImplementedError
+
+    def inventory_roots(
+        self, context: AdapterContext
+    ) -> tuple[InventoryRoot, ...]:
         raise NotImplementedError
