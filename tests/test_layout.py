@@ -12,6 +12,14 @@ from agent_workflow.paths import HostPaths
 from agent_workflow.resources import load_bundled_resource
 
 
+_CORE_TEMPLATES = (
+    "global-memory-index.md",
+    "global-rules.md",
+    "project-memory-index.md",
+    "project-rules.md",
+)
+
+
 def operation_paths(plan) -> set[str]:
     return {operation.path.replace("\\", "/") for operation in plan.operations}
 
@@ -202,6 +210,38 @@ def test_resource_loader_rejects_unsafe_paths(path: str) -> None:
 
 def test_resource_loader_reads_source_checkout_template() -> None:
     assert load_bundled_resource("templates/core/global-rules.md")
+
+
+def test_wheel_template_mirrors_match_canonical_sources() -> None:
+    """A stale package mirror must fail before a wheel can ship divergent defaults."""
+    checkout = Path(__file__).resolve().parents[1]
+    canonical = checkout / "templates" / "core"
+    bundled = checkout / "src" / "agent_workflow" / "_bundled" / "templates" / "core"
+
+    assert {
+        path.name: path.read_bytes() for path in sorted(canonical.glob("*.md"))
+    } == {
+        path.name: path.read_bytes() for path in sorted(bundled.glob("*.md"))
+    }
+    assert tuple(sorted(path.name for path in bundled.glob("*.md"))) == _CORE_TEMPLATES
+
+
+def test_source_checkout_rejects_drifted_wheel_template_mirror(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Source runs must expose mirror drift instead of silently choosing one copy."""
+    checkout = tmp_path / "checkout"
+    canonical = checkout / "templates" / "core" / "global-rules.md"
+    bundled = checkout / "src" / "agent_workflow" / "_bundled" / "templates" / "core" / "global-rules.md"
+    canonical.parent.mkdir(parents=True)
+    bundled.parent.mkdir(parents=True)
+    canonical.write_text("canonical\n", encoding="utf-8")
+    bundled.write_text("stale\n", encoding="utf-8")
+    monkeypatch.setattr(resources_module.resources, "files", lambda _: checkout / "src" / "agent_workflow")
+    monkeypatch.setattr(resources_module, "_source_checkout_root", lambda: checkout)
+
+    with pytest.raises(ValueError, match="differs from canonical source"):
+        load_bundled_resource("templates/core/global-rules.md")
 
 
 def test_resource_loader_rejects_bundled_symlink_escape(

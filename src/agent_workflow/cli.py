@@ -27,7 +27,7 @@ def build_parser() -> argparse.ArgumentParser:
     scan.add_argument("--json", action="store_true")
 
     plan = subcommands.add_parser("plan")
-    plan_subcommands = plan.add_subparsers(dest="plan_command")
+    plan_subcommands = plan.add_subparsers(dest="plan_command", required=True)
     init = plan_subcommands.add_parser("init")
     init.add_argument("--scope", choices=tuple(scope.value for scope in Scope), required=True)
     init.add_argument("--profile", choices=tuple(profile.value for profile in ProjectProfile))

@@ -9,13 +9,16 @@ requires-python = ">=3.11"
 dependencies = []
 
 [project.optional-dependencies]
-dev = ["pytest>=8.3"]
+dev = ["pytest>=8.3", "setuptools>=75"]
 
 [project.scripts]
 agent-workflow = "agent_workflow.cli:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
+
+[tool.setuptools.package-data]
+agent_workflow = ["_bundled/templates/core/*.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

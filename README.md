@@ -332,6 +332,10 @@ This foundation requires Python 3.11 or newer. Install the editable development
 environment with `python -m pip install -e .[dev]`, then run the test suite
 with `python -m pytest -v`.
 
+The Markdown files under `templates/core/` are canonical. Wheel copies under
+`src/agent_workflow/_bundled/templates/core/` must remain byte-for-byte mirrors;
+the test suite rejects drift and verifies the installed, non-editable wheel.
+
 ## Foundation CLI
 
 The current foundation provides five commands: `scan`, `plan init`, `apply`,

@@ -25,20 +25,27 @@ def _load_resource(relative_path: str) -> tuple[bytes, Path | None]:
     bundled_root = package_root.joinpath("_bundled")
     _validate_filesystem_containment(package_root, bundled_root, "package resources")
     bundled = bundled_root.joinpath(*parts)
+    bundled_content: bytes | None = None
     if bundled.is_file():
         _validate_filesystem_containment(bundled_root, bundled, "bundled resources")
-        return bundled.read_bytes(), None
+        bundled_content = bundled.read_bytes()
 
     checkout_root = _source_checkout_root()
-    if checkout_root is None:
-        raise FileNotFoundError(
-            f"no bundled resource and no valid source checkout fallback: {normalized}"
-        )
-    candidate = checkout_root.joinpath(*parts)
-    _validate_filesystem_containment(checkout_root, candidate, "source checkout")
-    if not candidate.is_file():
-        raise FileNotFoundError(f"resource not found: {normalized}")
-    return candidate.read_bytes(), checkout_root
+    if checkout_root is not None:
+        candidate = checkout_root.joinpath(*parts)
+        _validate_filesystem_containment(checkout_root, candidate, "source checkout")
+        if not candidate.is_file():
+            raise FileNotFoundError(f"resource not found: {normalized}")
+        canonical_content = candidate.read_bytes()
+        if bundled_content is not None and bundled_content != canonical_content:
+            raise ValueError(f"bundled resource differs from canonical source: {normalized}")
+        return canonical_content, checkout_root
+
+    if bundled_content is not None:
+        return bundled_content, None
+    raise FileNotFoundError(
+        f"no bundled resource and no valid source checkout fallback: {normalized}"
+    )
 
 
 def _source_checkout_root() -> Path | None:
