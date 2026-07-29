@@ -49,11 +49,25 @@ def test_scan_and_doctor_json_are_machine_readable(tmp_path: Path, capsys) -> No
     home.mkdir()
     cwd.mkdir()
 
-    assert main(["scan", "--home", str(home), "--cwd", str(cwd), "--json"]) == 0
+    assert main(
+        [
+            "scan",
+            "--home",
+            str(home),
+            "--cwd",
+            str(cwd),
+            "--agents",
+            "--json",
+        ]
+    ) == 0
     scan = json.loads(capsys.readouterr().out)
     assert scan["home"] == str(home.resolve())
     assert scan["cwd"] == str(cwd.resolve())
     assert scan["global_agents_exists"] is False
+    assert [item["adapter_id"] for item in scan["agents"]] == [
+        "claude",
+        "codex",
+    ]
 
     assert main(["doctor", "--scope-root", str(home / ".agents"), "--json"]) == 2
     doctor = json.loads(capsys.readouterr().out)

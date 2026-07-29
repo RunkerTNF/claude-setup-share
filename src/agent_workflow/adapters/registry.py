@@ -44,6 +44,26 @@ class AdapterRegistry:
         )
 
     @classmethod
+    def combine(
+        cls, registries: Iterable["AdapterRegistry"]
+    ) -> "AdapterRegistry":
+        adapters: dict[str, AgentAdapter] = {}
+        blocked: set[str] = set()
+        for registry in registries:
+            for adapter_id, adapter in registry._adapters.items():
+                if adapter_id in adapters or adapter_id in blocked:
+                    raise ValueError(f"duplicate adapter id: {adapter_id}")
+                adapters[adapter_id] = adapter
+            for adapter_id in registry._blocked_python_ids:
+                if adapter_id in adapters or adapter_id in blocked:
+                    raise ValueError(f"duplicate adapter id: {adapter_id}")
+                blocked.add(adapter_id)
+        return cls(
+            dict(sorted(adapters.items())),
+            sorted(blocked),
+        )
+
+    @classmethod
     def from_directories(
         cls,
         paths: Iterable[Path],
@@ -142,6 +162,19 @@ class AdapterRegistry:
         return tuple(
             sorted(detections, key=lambda detection: detection.adapter_id)
         )
+
+
+def builtin_registry() -> AdapterRegistry:
+    """Return the guaranteed built-in adapter registry."""
+    from .claude import ClaudeAdapter
+    from .codex import CodexAdapter
+
+    return AdapterRegistry.from_pairs(
+        (
+            ("claude", ClaudeAdapter()),
+            ("codex", CodexAdapter()),
+        )
+    )
 
 
 def _load_python_adapter(

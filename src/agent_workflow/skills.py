@@ -114,26 +114,9 @@ def plan_skill_install(
 
     canonical_parent = context.neutral_root / "skills"
     scope_root = target_root_for(context)
-    operations: list[WriteOperation] = []
+    operations = list(plan_canonical_skill_install(context, skills))
     for skill in sorted(skills, key=lambda item: item.name.casefold()):
         canonical_root = canonical_parent / skill.name
-        if not _same_path(skill.root, canonical_root):
-            for source in _skill_files(skill.root):
-                relative = source.relative_to(skill.root).as_posix()
-                target_path = f"skills/{skill.name}/{relative}"
-                target = context.neutral_root.joinpath(*target_path.split("/"))
-                operations.append(
-                    WriteOperation.from_bytes(
-                        root_id="neutral",
-                        path=target_path,
-                        content=source.read_bytes(),
-                        expected_sha256=safe_current_hash(
-                            target, context.neutral_root
-                        ),
-                        ownership=Ownership.CANONICAL,
-                    )
-                )
-
         for location in manifest.for_scope(context.scope).skill_locations:
             if location.mode != "wrapper":
                 continue
@@ -164,6 +147,35 @@ def plan_skill_install(
             ),
         )
     )
+
+
+def plan_canonical_skill_install(
+    context: AdapterContext,
+    skills: tuple[PortableSkill, ...],
+) -> tuple[WriteOperation, ...]:
+    """Plan canonical skill copies independently of native agent targets."""
+    canonical_parent = context.neutral_root / "skills"
+    operations: list[WriteOperation] = []
+    for skill in sorted(skills, key=lambda item: item.name.casefold()):
+        canonical_root = canonical_parent / skill.name
+        if _same_path(skill.root, canonical_root):
+            continue
+        for source in _skill_files(skill.root):
+            relative = source.relative_to(skill.root).as_posix()
+            target_path = f"skills/{skill.name}/{relative}"
+            target = context.neutral_root.joinpath(*target_path.split("/"))
+            operations.append(
+                WriteOperation.from_bytes(
+                    root_id="neutral",
+                    path=target_path,
+                    content=source.read_bytes(),
+                    expected_sha256=safe_current_hash(
+                        target, context.neutral_root
+                    ),
+                    ownership=Ownership.CANONICAL,
+                )
+            )
+    return tuple(operations)
 
 
 def _skill_files(root: Path) -> tuple[Path, ...]:
