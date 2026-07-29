@@ -24,7 +24,9 @@ _VENDOR_PATTERNS = (
         re.IGNORECASE,
     ),
     re.compile(r"(?<![\w.-])\.(?:claude|codex)(?:[\\/]|$)", re.IGNORECASE),
-    re.compile(r"(?im)^\s*(?:Bash|Read|Write|Edit|Glob|Grep|Task)\s*\("),
+    re.compile(
+        r"(?im)^\s*(?:Bash|Read|Write|Edit|Glob|Grep|Task)\s*\(\s*(?:[A-Za-z_][A-Za-z0-9_]*\s*=|[\"'{\[])"
+    ),
     re.compile(r"(?im)^\s*(?:hooks?|permissions?|subagents?|allowed-tools?)\s*:\s*"),
 )
 _VENDOR_FRONTMATTER = frozenset({"allowed-tools", "tools", "hooks", "permissions", "subagents"})

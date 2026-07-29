@@ -78,6 +78,23 @@ def test_concrete_native_configuration_path_is_rejected_without_prose_name_false
     assert [item.code for item in lint_skill(skill)] == ["portable.vendor-token"]
 
 
+def test_parenthetical_read_prose_is_not_a_native_tool_invocation(tmp_path: Path) -> None:
+    skill = tmp_path / "review"
+    write_skill(skill, "Read (and follow) the checklist.")
+
+    assert lint_skill(skill) == ()
+
+
+def test_named_argument_read_is_a_native_tool_invocation(tmp_path: Path) -> None:
+    skill = tmp_path / "review"
+    write_skill(skill, 'Read(file_path="references/checklist.md")')
+    reference = skill / "references" / "checklist.md"
+    reference.parent.mkdir()
+    reference.write_text("- Check behavior\n", encoding="utf-8")
+
+    assert "portable.vendor-token" in {item.code for item in lint_skill(skill)}
+
+
 def test_lint_rejects_missing_and_unsafe_references(tmp_path: Path) -> None:
     skill = tmp_path / "review"
     write_skill(skill, "Read references/missing.md and ../private.md.")
