@@ -19,6 +19,10 @@ _WHEEL_RESOURCES = {
     "agent_workflow/adapters/codex/templates/global-agents.md",
     "agent_workflow/adapters/codex/templates/project-agents-override.md",
     "agent_workflow/adapters/codex/templates/project-agents.md",
+    "agent_workflow/adapters/claude/adapter.json",
+    "agent_workflow/adapters/claude/templates/global-claude.md",
+    "agent_workflow/adapters/claude/templates/project-claude-local.md",
+    "agent_workflow/adapters/claude/templates/project-claude.md",
 }
 
 
@@ -120,6 +124,17 @@ def test_non_editable_wheel_contains_resources_and_runs_full_cli_smoke(tmp_path:
         environment=environment,
     )
     assert adapter.stdout.strip() == "codex"
+    claude_adapter = _run(
+        [
+            str(python),
+            "-c",
+            "from agent_workflow.adapters.claude import ClaudeAdapter; "
+            "print(ClaudeAdapter().id)",
+        ],
+        cwd=tmp_path,
+        environment=environment,
+    )
+    assert claude_adapter.stdout.strip() == "claude"
 
     smoke = _run(
         [str(python), str(checkout / "tests" / "installed_cli_smoke.py")],
