@@ -14,11 +14,15 @@ _FRONTMATTER_FIELD = re.compile(r"^([A-Za-z][A-Za-z0-9_-]*):[ \t]*(.*?)$")
 _SKILL_NAME = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 _MARKDOWN_LINK = re.compile(r"\]\(([^)\s]+)(?:\s+[^)]*)?\)")
 _FILE_REFERENCE = re.compile(
-    r"(?<![\w.-])(?P<reference>(?:(?:\.\.?|[A-Za-z]:)?[\\/])?(?:[\w.-]+[\\/])+[\w.-]+\.[A-Za-z0-9]+)"
+    r"(?<![\w.$-])(?P<reference>(?:(?:\.\.?|[A-Za-z]:)?[\\/])?(?:[\w.-]+[\\/])+[\w.-]+\.[A-Za-z0-9]+)"
 )
+_BARE_FILE_REFERENCE = re.compile(r"(?<![\w.$/\\-])(?P<reference>[\w-]+\.[A-Za-z0-9]+)(?![\w-])")
 _TEXT_SUFFIXES = frozenset({".md", ".markdown", ".txt"})
 _VENDOR_PATTERNS = (
-    re.compile(r"\$\{(?:CLAUDE_SKILL_DIR|CLAUDE_PLUGIN_ROOT|CODEX_HOME)\}", re.IGNORECASE),
+    re.compile(
+        r"\$(?:\{(?:CLAUDE_SKILL_DIR|CLAUDE_PLUGIN_ROOT|CODEX_HOME)\}|(?:CLAUDE_SKILL_DIR|CLAUDE_PLUGIN_ROOT|CODEX_HOME)\b)",
+        re.IGNORECASE,
+    ),
     re.compile(r"(?<![\w.-])\.(?:claude|codex)(?:[\\/]|$)", re.IGNORECASE),
     re.compile(r"(?im)^\s*(?:Bash|Read|Write|Edit|Glob|Grep|Task)\s*\("),
     re.compile(r"(?im)^\s*(?:hooks?|permissions?|subagents?|allowed-tools?)\s*:\s*"),
@@ -180,7 +184,16 @@ def _references(text: str) -> tuple[str, ...]:
             found.add(candidate)
     for match in _FILE_REFERENCE.finditer(text):
         candidate = match.group("reference").strip().rstrip(".,;:!?")
-        if candidate and not _is_external(candidate) and not _is_vendor_path(candidate):
+        if (
+            candidate
+            and not _is_external(candidate)
+            and not _is_vendor_path(candidate)
+            and not _follows_vendor_environment_token(text, match.start())
+        ):
+            found.add(candidate)
+    for match in _BARE_FILE_REFERENCE.finditer(text):
+        candidate = match.group("reference")
+        if _looks_like_bare_reference(text, match.start()):
             found.add(candidate)
     return tuple(sorted(found, key=str.casefold))
 
@@ -191,6 +204,22 @@ def _is_external(reference: str) -> bool:
 
 def _is_vendor_path(reference: str) -> bool:
     return re.match(r"^\.(?:claude|codex)(?:[\\/]|$)", reference, re.IGNORECASE) is not None
+
+
+def _follows_vendor_environment_token(text: str, start: int) -> bool:
+    return re.search(
+        r"\$(?:\{(?:CLAUDE_SKILL_DIR|CLAUDE_PLUGIN_ROOT|CODEX_HOME)\}|(?:CLAUDE_SKILL_DIR|CLAUDE_PLUGIN_ROOT|CODEX_HOME)\b)[\\/]$",
+        text[:start],
+        re.IGNORECASE,
+    ) is not None
+
+
+def _looks_like_bare_reference(text: str, start: int) -> bool:
+    return re.search(
+        r"(?:^|[\n.;:])\s*(?:read|see|open|run|use|follow)\s+(?:the\s+)?$",
+        text[:start],
+        re.IGNORECASE,
+    ) is not None
 
 
 def _reference_target(root: Path, parent: Path, reference: str) -> Path | None:

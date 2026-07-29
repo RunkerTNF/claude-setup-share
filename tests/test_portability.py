@@ -25,6 +25,28 @@ def test_portable_skill_accepts_standard_core_with_packaged_reference(tmp_path: 
     assert lint_skill(skill) == ()
 
 
+def test_portable_skill_accepts_bare_packaged_reference(tmp_path: Path) -> None:
+    skill = tmp_path / "review"
+    write_skill(skill, "Read checklist.md.")
+    (skill / "checklist.md").write_text("- Check behavior\n", encoding="utf-8")
+
+    assert lint_skill(skill) == ()
+
+
+def test_lint_reports_missing_bare_packaged_reference(tmp_path: Path) -> None:
+    skill = tmp_path / "review"
+    write_skill(skill, "Read checklist.md.")
+
+    assert [item.code for item in lint_skill(skill)] == ["portable.reference-missing"]
+
+
+def test_ordinary_prose_filename_is_not_treated_as_a_packaged_reference(tmp_path: Path) -> None:
+    skill = tmp_path / "review"
+    write_skill(skill, "The example filename checklist.md documents the expected naming convention.")
+
+    assert lint_skill(skill) == ()
+
+
 def test_vendor_syntax_is_rejected_from_core_with_stable_codes(tmp_path: Path) -> None:
     skill = tmp_path / "review"
     skill.mkdir()
@@ -38,6 +60,13 @@ def test_vendor_syntax_is_rejected_from_core_with_stable_codes(tmp_path: Path) -
         "portable.frontmatter",
         "portable.vendor-token",
     }
+
+
+def test_unbraced_vendor_environment_token_is_rejected(tmp_path: Path) -> None:
+    skill = tmp_path / "review"
+    write_skill(skill, "Read $CLAUDE_PLUGIN_ROOT/references/checklist.md.")
+
+    assert [item.code for item in lint_skill(skill)] == ["portable.vendor-token"]
 
 
 def test_concrete_native_configuration_path_is_rejected_without_prose_name_false_positive(

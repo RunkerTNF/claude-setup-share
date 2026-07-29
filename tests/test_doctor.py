@@ -103,6 +103,34 @@ def test_doctor_excludes_manifest_and_ephemeral_bootstrap_references(tmp_path: P
     assert run_doctor(root) == ()
 
 
+def test_doctor_scans_user_skill_path_named_backups_for_bootstrap_reference(tmp_path: Path) -> None:
+    root = tmp_path / ".agents"
+    bootstrap = str(tmp_path / "disposable-bootstrap")
+    write_manifest(root, generated_files={}, bootstrap_root=bootstrap)
+    write_core(root)
+    skill_file = root / "skills" / "backup-guide" / "SKILL.md"
+    skill_file.parent.mkdir(parents=True)
+    skill_file.write_text(
+        "---\nname: backup-guide\ndescription: Describe backups.\n---\n",
+        encoding="utf-8",
+    )
+    example = root / "skills" / "backup-guide" / "backups" / "example.md"
+    example.parent.mkdir(parents=True)
+    example.write_text(bootstrap, encoding="utf-8")
+
+    assert [item.code for item in run_doctor(root)] == ["bootstrap.reference"]
+
+
+def test_doctor_scans_non_transaction_lock_file_for_bootstrap_reference(tmp_path: Path) -> None:
+    root = tmp_path / ".agents"
+    bootstrap = str(tmp_path / "disposable-bootstrap")
+    write_manifest(root, generated_files={}, bootstrap_root=bootstrap)
+    write_core(root)
+    (root / "notes.lock").write_text(bootstrap, encoding="utf-8")
+
+    assert [item.code for item in run_doctor(root)] == ["bootstrap.reference"]
+
+
 def test_doctor_detects_normalized_bootstrap_reference_in_generated_text(tmp_path: Path) -> None:
     root = tmp_path / ".agents"
     bootstrap = str(tmp_path / "Disposable-Bootstrap")

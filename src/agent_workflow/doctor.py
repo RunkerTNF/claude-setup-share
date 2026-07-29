@@ -12,8 +12,13 @@ from .model import Severity, normalize_relative_path
 
 
 _MAX_TEXT_BYTES = 1024 * 1024
-_TEXT_SUFFIXES = frozenset({".md", ".markdown", ".txt", ".json", ".py", ".toml", ".yaml", ".yml", ".ini"})
-_EPHEMERAL_PARTS = frozenset({"backups", "journals", "staging", "locks"})
+_TEXT_SUFFIXES = frozenset({".md", ".markdown", ".txt", ".json", ".py", ".toml", ".yaml", ".yml", ".ini", ".lock"})
+_TRANSACTION_STORAGE_PREFIXES = (
+    ("workflow", "backups"),
+    ("workflow", "journals"),
+    ("workflow", "staging"),
+    ("workflow", "locks"),
+)
 
 
 @dataclass(frozen=True)
@@ -181,8 +186,10 @@ def _bounded_text_files(root: Path):
 
 
 def _excluded_from_bootstrap_scan(relative_path: str) -> bool:
-    parts = Path(relative_path).parts
-    return any(part.casefold() in _EPHEMERAL_PARTS for part in parts) or relative_path.casefold().endswith(".lock")
+    parts = tuple(part.casefold() for part in Path(relative_path).parts)
+    return relative_path.casefold() == ".workflow.lock" or any(
+        parts[: len(prefix)] == prefix for prefix in _TRANSACTION_STORAGE_PREFIXES
+    )
 
 
 def _safe_directory(path: Path, root: Path) -> bool:
