@@ -1,0 +1,78 @@
+{
+  "schema_version": 1,
+  "id": "codex",
+  "display_name": "Codex",
+  "executables": [
+    "codex"
+  ],
+  "version_args": [
+    "--version"
+  ],
+  "supported_versions": [],
+  "global": {
+    "discovery_paths": [
+      ".codex/AGENTS.md"
+    ],
+    "instruction_entrypoints": [
+      {
+        "target": ".codex/AGENTS.md",
+        "template": "templates/global-agents.md",
+        "profiles": []
+      }
+    ],
+    "skill_locations": [
+      {
+        "path": ".agents/skills",
+        "mode": "direct"
+      }
+    ]
+  },
+  "project": {
+    "discovery_paths": [
+      "AGENTS.md",
+      "AGENTS.override.md"
+    ],
+    "instruction_entrypoints": [
+      {
+        "target": "AGENTS.override.md",
+        "template": "templates/project-agents-override.md",
+        "profiles": [
+          "local"
+        ]
+      },
+      {
+        "target": "AGENTS.md",
+        "template": "templates/project-agents.md",
+        "profiles": [
+          "shared",
+          "split"
+        ]
+      }
+    ],
+    "skill_locations": [
+      {
+        "path": ".agents/skills",
+        "mode": "direct"
+      }
+    ]
+  },
+  "capabilities": {
+    "commands": "partial",
+    "hooks": "supported",
+    "mcp": "supported",
+    "permissions": "supported",
+    "rules": "supported",
+    "skills": "supported",
+    "subagents": "partial"
+  },
+  "sensitive_keys": [
+    "api_key",
+    "bearer_token",
+    "http_headers"
+  ],
+  "validation": [],
+  "smoke": [
+    "Open a fresh Codex session.",
+    "Verify common rules and canonical skills are available."
+  ]
+}

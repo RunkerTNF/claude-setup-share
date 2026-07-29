@@ -22,52 +22,7 @@ class DeclarativeAdapter:
         self.id = manifest.id
 
     def detect(self, context: AdapterContext) -> AdapterDetection:
-        del context
-        executable = next(
-            (
-                discovered
-                for candidate in self.manifest.executables
-                if (discovered := shutil.which(candidate)) is not None
-            ),
-            None,
-        )
-        if executable is None:
-            return AdapterDetection(self.id, False, None, None)
-        try:
-            completed = subprocess.run(
-                [executable, *self.manifest.version_args],
-                check=False,
-                capture_output=True,
-                text=True,
-                timeout=5,
-            )
-        except (OSError, subprocess.TimeoutExpired) as error:
-            return AdapterDetection(
-                self.id,
-                True,
-                executable,
-                None,
-                f"version detection failed: {type(error).__name__}",
-            )
-        output = completed.stdout.strip() or completed.stderr.strip()
-        version = output.splitlines()[0].strip() if output else None
-        if completed.returncode != 0:
-            return AdapterDetection(
-                self.id,
-                True,
-                executable,
-                version,
-                f"version command exited with {completed.returncode}",
-            )
-        if version is None:
-            warning = "version command returned no version"
-        elif not self.manifest.supported_versions:
-            warning = "detected version has not been release-smoke verified"
-        elif version not in self.manifest.supported_versions:
-            warning = f"unsupported or unverified version: {version}"
-        else:
-            warning = None
-        return AdapterDetection(self.id, True, executable, version, warning)
+        return detect_manifest(self.manifest, context)
 
     def plan_entrypoints(
         self, context: AdapterContext
@@ -126,6 +81,57 @@ def _scope_root(context: AdapterContext) -> Path:
     if context.project_root is None:
         raise ValueError("project adapter context requires a project root")
     return context.project_root
+
+
+def detect_manifest(
+    manifest: AdapterManifest, context: AdapterContext
+) -> AdapterDetection:
+    del context
+    executable = next(
+        (
+            discovered
+            for candidate in manifest.executables
+            if (discovered := shutil.which(candidate)) is not None
+        ),
+        None,
+    )
+    if executable is None:
+        return AdapterDetection(manifest.id, False, None, None)
+    try:
+        completed = subprocess.run(
+            [executable, *manifest.version_args],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (OSError, UnicodeError, subprocess.TimeoutExpired) as error:
+        return AdapterDetection(
+            manifest.id,
+            True,
+            executable,
+            None,
+            f"version detection failed: {type(error).__name__}",
+        )
+    output = completed.stdout.strip() or completed.stderr.strip()
+    version = output.splitlines()[0].strip() if output else None
+    if completed.returncode != 0:
+        return AdapterDetection(
+            manifest.id,
+            True,
+            executable,
+            version,
+            f"version command exited with {completed.returncode}",
+        )
+    if version is None:
+        warning = "version command returned no version"
+    elif not manifest.supported_versions:
+        warning = "detected version has not been release-smoke verified"
+    elif version not in manifest.supported_versions:
+        warning = f"unsupported or unverified version: {version}"
+    else:
+        warning = None
+    return AdapterDetection(manifest.id, True, executable, version, warning)
 
 
 def _applies(

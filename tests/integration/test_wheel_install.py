@@ -10,11 +10,15 @@ import venv
 import zipfile
 
 
-_WHEEL_TEMPLATES = {
+_WHEEL_RESOURCES = {
     "agent_workflow/_bundled/templates/core/global-memory-index.md",
     "agent_workflow/_bundled/templates/core/global-rules.md",
     "agent_workflow/_bundled/templates/core/project-memory-index.md",
     "agent_workflow/_bundled/templates/core/project-rules.md",
+    "agent_workflow/adapters/codex/adapter.json",
+    "agent_workflow/adapters/codex/templates/global-agents.md",
+    "agent_workflow/adapters/codex/templates/project-agents-override.md",
+    "agent_workflow/adapters/codex/templates/project-agents.md",
 }
 
 
@@ -88,7 +92,7 @@ def test_non_editable_wheel_contains_resources_and_runs_full_cli_smoke(tmp_path:
     assert len(wheels) == 1
     wheel = wheels[0]
     with zipfile.ZipFile(wheel) as archive:
-        assert _WHEEL_TEMPLATES <= set(archive.namelist())
+        assert _WHEEL_RESOURCES <= set(archive.namelist())
 
     environment_root = tmp_path / "environment"
     venv.EnvBuilder(with_pip=True, clear=True).create(environment_root)
@@ -105,6 +109,17 @@ def test_non_editable_wheel_contains_resources_and_runs_full_cli_smoke(tmp_path:
     ).stdout.strip()
     assert str(environment_root.resolve()) in str(Path(installed).resolve())
     assert str(checkout.resolve()) not in str(Path(installed).resolve())
+    adapter = _run(
+        [
+            str(python),
+            "-c",
+            "from agent_workflow.adapters.codex import CodexAdapter; "
+            "print(CodexAdapter().id)",
+        ],
+        cwd=tmp_path,
+        environment=environment,
+    )
+    assert adapter.stdout.strip() == "codex"
 
     smoke = _run(
         [str(python), str(checkout / "tests" / "installed_cli_smoke.py")],
