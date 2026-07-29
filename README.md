@@ -325,3 +325,17 @@ CLI обзавёлся четырьмя дополнительными сабк�
 | Снапшот последнего плана    | `<repo>/.claude/sessions/_last_plan.md`      |
 
 Установка — см. [INSTALL.md](INSTALL.md).
+
+## Development
+
+This foundation requires Python 3.11 or newer. Install the editable development
+environment with `python -m pip install -e .[dev]`, then run the test suite
+with `python -m pytest -v`.
+
+## Foundation CLI
+
+The current foundation provides five commands: `scan`, `plan init`, `apply`,
+`doctor`, and `rollback`. Create and inspect a plan before applying it; every
+apply is journaled and can be rolled back with its journal path. This is the
+foundation slice for the neutral workflow manager, not the final setup or
+migration user experience.
