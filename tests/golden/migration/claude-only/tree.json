@@ -1,13 +1,13 @@
 {
   "RULES.md": {
-    "sha256": "d2ae4f0c7c2e0359972b456f796c7c76cd1f097edf1d0517447738fe2834f814",
-    "size_bytes": 296,
-    "text": "# Agent Workflow Rules\n\nThis file is the neutral, global source of truth for workflow rules shared by configured agents.\n\nBefore the first response or action, read every Markdown file under `rules/`\nbeside this file in lexical order. Then read\n`overlays/<current-agent>/RULES.md` when it exists.\n"
+    "sha256": "9eae0a8c98ba46564b3d4502c5a3664b18cede4f89f36ef9c69861bb27ecdc3d",
+    "size_bytes": 809,
+    "text": "# Agent Workflow Rules\n\n`.agents/RULES.md` is the neutral, global source of truth for workflow rules\nshared by configured agents.\n\nBefore the first response or action:\n\n1. Read every Markdown file under `.agents/rules/` in lexical order.\n2. Read `.agents/memory/MEMORY.md` and only the entries relevant to the task.\n3. Read `.agents/overlays/<current-agent>/RULES.md` when it exists.\n\nUse the portable `plan-review` skill to critique non-trivial implementation\nplans before implementation and `code-review` to critique non-trivial pending\nchanges before reporting completion or integration. The current agent performs\neach review unless the user explicitly requests delegation and the active\nagent supports it. Agent overlays may describe invocation mechanics but never\nreplace the portable review contracts.\n"
   },
   "manifest.json": {
-    "sha256": "b38e7d819b53f0ce16dd86d9e2e8b8d69b6055a7313715c21370ffa098f03385",
+    "sha256": "58b7a9ff69d84ff89f15a017b2326f1a9d49aefb6556cbe1a734cf5be11fd606",
     "size_bytes": 360,
-    "text": "{\n  \"bootstrap_root\": null,\n  \"generated_files\": {\n    \"neutral:RULES.md\": \"d2ae4f0c7c2e0359972b456f796c7c76cd1f097edf1d0517447738fe2834f814\",\n    \"neutral:memory/MEMORY.md\": \"026f95f4544092d38834af2c71b5e3cd8fcd1095b83e258d67c06b46147324fb\"\n  },\n  \"generator_version\": \"0.1.0\",\n  \"profile\": null,\n  \"schema_version\": 1,\n  \"scope\": \"global\",\n  \"targets\": []\n}\n"
+    "text": "{\n  \"bootstrap_root\": null,\n  \"generated_files\": {\n    \"neutral:RULES.md\": \"9eae0a8c98ba46564b3d4502c5a3664b18cede4f89f36ef9c69861bb27ecdc3d\",\n    \"neutral:memory/MEMORY.md\": \"026f95f4544092d38834af2c71b5e3cd8fcd1095b83e258d67c06b46147324fb\"\n  },\n  \"generator_version\": \"0.1.0\",\n  \"profile\": null,\n  \"schema_version\": 1,\n  \"scope\": \"global\",\n  \"targets\": []\n}\n"
   },
   "memory/IMPORTED.md": {
     "sha256": "b7337aedb4e050860bf627bdaa446c8949b1ed0be5800529124a09fda84399a6",

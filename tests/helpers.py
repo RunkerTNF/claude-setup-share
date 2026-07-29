@@ -42,6 +42,16 @@ def skill_text(repo_root: Path, name: str) -> str:
     ).read_text(encoding="utf-8")
 
 
+def overlay_text(
+    repo_root: Path,
+    agent: str,
+    name: str,
+) -> str:
+    return (
+        repo_root / "templates" / "overlays" / agent / name
+    ).read_text(encoding="utf-8")
+
+
 def load_skill(repo_root: Path, name: str) -> LoadedSkill:
     source = skill_text(repo_root, name)
     parsed_name, description, body = parse_portable_skill_frontmatter(
