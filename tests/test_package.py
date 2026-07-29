@@ -88,7 +88,7 @@ def test_bootstrap_defaults_to_read_only_preview(tmp_path: Path) -> None:
     assert completed.returncode == 0, completed.stderr
     assert "Detected adapters:" in completed.stdout
     assert "Setup preview:" in completed.stdout
-    assert "Preview only." in completed.stdout
+    assert "No changes applied." in completed.stdout
     assert not (home / ".agents").exists()
 
 

@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 import sys
+import tempfile
 
 
 if sys.version_info < (3, 11):
@@ -20,20 +21,8 @@ if sys.version_info < (3, 11):
 CHECKOUT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(CHECKOUT / "src"))
 
-from agent_workflow import __version__  # noqa: E402
-from agent_workflow.adapters.base import AdapterContext  # noqa: E402
-from agent_workflow.adapters.registry import (  # noqa: E402
-    AdapterRegistry,
-    builtin_registry,
-)
-from agent_workflow.doctor import run_doctor  # noqa: E402
+from agent_workflow.cli import main as manager_main  # noqa: E402
 from agent_workflow.model import ProjectProfile, Scope  # noqa: E402
-from agent_workflow.setup import (  # noqa: E402
-    SetupRequest,
-    build_setup_plan,
-    detect_setup_targets,
-)
-from agent_workflow.transactions import apply_plan  # noqa: E402
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -84,82 +73,67 @@ def main(argv: list[str] | None = None) -> int:
             "global setup does not accept --profile or --project-root"
         )
 
-    adapter_sources = tuple(
-        Path(path).resolve() for path in args.adapter_dir
-    )
-    external = (
-        AdapterRegistry.from_directories(
-            adapter_sources,
-            args.trust_adapter_code,
+    common = [
+        "--scope",
+        scope.value,
+        "--home",
+        str(home),
+    ]
+    if project_root is not None:
+        common.extend(("--project", str(project_root)))
+    if profile is not None:
+        common.extend(("--profile", profile.value))
+    for target in args.target:
+        common.extend(("--target", target))
+    for adapter_dir in args.adapter_dir:
+        common.extend(
+            ("--adapter-dir", str(Path(adapter_dir).resolve()))
         )
-        if adapter_sources
-        else AdapterRegistry.from_pairs(())
-    )
-    if args.trust_adapter_code and not adapter_sources:
-        raise ValueError(
-            "adapter code trust requires an explicit --adapter-dir"
-        )
-    registry = AdapterRegistry.combine((builtin_registry(), external))
-    context = AdapterContext(
-        home=home,
-        project_root=project_root,
-        neutral_root=(
-            home / ".agents"
-            if scope is Scope.GLOBAL
-            else project_root / ".agents"
-        ),
-        scope=scope,
-        profile=profile,
-        generator_version=__version__,
-    )
-    detections = detect_setup_targets(context, registry)
-    print("Detected adapters:")
-    for detection in detections:
-        state = "installed" if detection.installed else "not-installed"
-        warning = f"; {detection.warning}" if detection.warning else ""
-        print(f"- {detection.adapter_id}: {state}{warning}")
+    for adapter_id in args.trust_adapter_code:
+        common.extend(("--trust-adapter-code", adapter_id))
 
-    targets = tuple(args.target) or tuple(
-        item.adapter_id for item in detections if item.installed
-    )
-    request = SetupRequest(
-        home=home,
-        project_root=project_root,
-        source_root=CHECKOUT,
-        scope=scope,
-        profile=profile,
-        targets=targets,
-        manage_syncprotect=args.manage_syncprotect,
-        adapter_sources=adapter_sources,
-        trusted_adapter_ids=tuple(args.trust_adapter_code),
-    )
-    plan = build_setup_plan(request)
-    print("\nSetup preview:")
-    print(plan.to_json(), end="")
-    if plan.conflicts:
-        print("Setup has conflicts; nothing was applied.", file=sys.stderr)
-        return 3
-    if not args.apply:
-        print("Preview only. Re-run with --apply after reviewing the plan.")
-        return 0
-    if not args.yes:
-        confirmation = input("Apply this exact plan? [y/N] ").strip().casefold()
-        if confirmation not in {"y", "yes"}:
-            print("Cancelled; nothing was applied.")
+    detected = manager_main(["setup", "detect", *common])
+    if detected != 0:
+        return detected
+
+    with tempfile.TemporaryDirectory(
+        prefix="agent-workflow-bootstrap-"
+    ) as temporary:
+        plan_path = Path(temporary) / "setup-plan.json"
+        preview_arguments = [
+            "setup",
+            "preview",
+            *common,
+            "--source-root",
+            str(CHECKOUT),
+            "--output",
+            str(plan_path),
+        ]
+        if args.manage_syncprotect:
+            preview_arguments.append("--manage-syncprotect")
+        previewed = manager_main(preview_arguments)
+        if previewed != 0:
+            print(
+                "Setup preview was not applicable; no changes applied.",
+                file=sys.stderr,
+            )
+            return previewed
+        if not args.apply:
+            print(
+                "No changes applied. Re-run with --apply after "
+                "reviewing the plan."
+            )
             return 0
 
-    journal = apply_plan(plan)
-    print(f"Applied transaction {journal.transaction_id}.")
-    diagnostics = run_doctor(Path(plan.scope_root))
-    if diagnostics:
-        for item in diagnostics:
-            print(
-                f"{item.severity.value}: {item.code}: "
-                f"{item.path}: {item.message}"
-            )
-        return 2
-    print("doctor: clean")
-    return 0
+        apply_arguments = [
+            "setup",
+            "apply",
+            "--plan",
+            str(plan_path),
+        ]
+        if args.yes:
+            apply_arguments.append("--yes")
+        return manager_main(apply_arguments)
 
 
 if __name__ == "__main__":

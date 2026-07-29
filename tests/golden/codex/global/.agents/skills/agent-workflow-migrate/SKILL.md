@@ -7,9 +7,17 @@ description: Use when converting an existing single-agent or mixed-agent setup i
 
 Use the installed workflow manager to migrate legacy rules, skills, commands,
 memory, sessions, and native settings without silently changing or deleting
-their sources. Read
-[the classification contract](references/classification-contract.md)
-completely before creating a semantic classification response.
+their sources.
+
+Resolve the persistent manager in this order:
+
+1. Use `agent-workflow` on `PATH` when available.
+2. Otherwise run `~/.agents/workflow/agent-workflow.pyz` with Python 3.11 or
+   newer.
+
+Read [the classification contract](references/classification-contract.md)
+completely before creating a semantic classification response. Read
+[recovery](references/recovery.md) before applying a migration.
 
 Follow this sequence:
 

@@ -3,14 +3,16 @@
   "generated_files": {
     "neutral:RULES.md": "d2ae4f0c7c2e0359972b456f796c7c76cd1f097edf1d0517447738fe2834f814",
     "neutral:memory/MEMORY.md": "026f95f4544092d38834af2c71b5e3cd8fcd1095b83e258d67c06b46147324fb",
-    "neutral:skills/agent-workflow-migrate/SKILL.md": "322459442e7946ff884a6a55d194b4def414648a7c847cd28cacb193587304ca",
+    "neutral:skills/agent-workflow-migrate/SKILL.md": "cf4c682fae801f1b9a2b0a9897d57350d1ea789df66f32a6055aef0028ed0553",
     "neutral:skills/agent-workflow-migrate/references/classification-contract.md": "9ed613e73d18e27c5a1c6d79bd3478233585dec2ccd9955bad2f5deb16d99f80",
-    "neutral:skills/agent-workflow-setup/SKILL.md": "81434362729e6dd1d42faf42e529f5d212d3b09294e5f508cfb12886b8228ef3",
+    "neutral:skills/agent-workflow-migrate/references/recovery.md": "502cc51cbde02729b18f27e1195b4d7fad16ec6ff35b63ba9942864d283cec0b",
+    "neutral:skills/agent-workflow-setup/SKILL.md": "40b7381235a1f0133486546452415b2f9d54a27bf00cc60771737a8d92977618",
     "neutral:skills/agent-workflow-setup/references/flow.md": "9a0cb501b4d1a84f0e70feed8aa787b0122438701c15e65048b2c8c0b3138a0c",
-    "neutral:workflow/agent-workflow.pyz": "719cef1c86da6a892bca0b5ef931aa240e07e2e3a191e86bf316a288ba55511c",
+    "neutral:skills/agent-workflow-setup/references/setup-flow.md": "8385ceddae686a8d8d66ae34c496de202cb990d978eda498b37c7cec481fa717",
+    "neutral:workflow/agent-workflow.pyz": "52d55618033e19e1f193535c3e3a427004aadfe99a0491c1ddeab37c3c6ab9ef",
     "scope:.claude/CLAUDE.md": "80d08f17e301a85e3c692ee9a6c6896239f057e788ff230b6150fd731e395d38",
-    "scope:.claude/skills/agent-workflow-migrate/SKILL.md": "3283fe1fc51026da788b85a6e745e2bd3432309d18736fd8d348262ac9fe2aca",
-    "scope:.claude/skills/agent-workflow-setup/SKILL.md": "60f68f9862d11835370cdd1492a3bf4ef2532e9babb80593ef61faa48413b8d0"
+    "scope:.claude/skills/agent-workflow-migrate/SKILL.md": "2d7d415d7856492c3406bd10e15814a1a3a9724959fb4660eb6018d44363c376",
+    "scope:.claude/skills/agent-workflow-setup/SKILL.md": "d9baca7bb545f0ab4b5f8f186a305bdf253bff9cb6ac5ff51915324a474c6838"
   },
   "generator_version": "0.1.0",
   "profile": null,

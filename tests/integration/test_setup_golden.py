@@ -4,13 +4,18 @@ from pathlib import Path
 
 import pytest
 
-from tests.helpers import apply_setup_fixture, assert_tree_matches
+from tests.helpers import (
+    apply_setup_fixture,
+    assert_tree_matches,
+    update_tree_golden,
+)
 
 
 @pytest.mark.parametrize("agent", ["claude", "codex"])
 def test_global_setup_matches_golden(
     tmp_path: Path,
     agent: str,
+    pytestconfig: pytest.Config,
 ) -> None:
     actual = apply_setup_fixture(
         tmp_path,
@@ -19,6 +24,8 @@ def test_global_setup_matches_golden(
     )
     expected = Path("tests/golden") / agent / "global"
 
+    if pytestconfig.getoption("--update-goldens"):
+        update_tree_golden(actual, expected)
     assert_tree_matches(actual, expected)
 
 
@@ -28,6 +35,7 @@ def test_project_setup_matches_golden(
     tmp_path: Path,
     agent: str,
     profile: str,
+    pytestconfig: pytest.Config,
 ) -> None:
     actual = apply_setup_fixture(
         tmp_path,
@@ -36,4 +44,6 @@ def test_project_setup_matches_golden(
     )
     expected = Path("tests/golden") / agent / f"project-{profile}"
 
+    if pytestconfig.getoption("--update-goldens"):
+        update_tree_golden(actual, expected)
     assert_tree_matches(actual, expected)

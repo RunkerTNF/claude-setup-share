@@ -92,6 +92,18 @@ def test_portable_skill_accepts_bare_packaged_reference(tmp_path: Path) -> None:
     assert lint_skill(skill) == ()
 
 
+def test_neutral_home_runtime_path_is_not_a_packaged_reference(
+    tmp_path: Path,
+) -> None:
+    skill = tmp_path / "review"
+    write_skill(
+        skill,
+        "Run `~/.agents/workflow/agent-workflow.pyz` with Python.",
+    )
+
+    assert lint_skill(skill) == ()
+
+
 def test_lint_reports_missing_bare_packaged_reference(tmp_path: Path) -> None:
     skill = tmp_path / "review"
     write_skill(skill, "Read checklist.md.")

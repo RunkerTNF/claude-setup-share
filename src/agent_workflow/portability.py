@@ -215,6 +215,11 @@ def _references(text: str) -> tuple[str, ...]:
             and not _is_external(candidate)
             and not _is_vendor_path(candidate)
             and not _follows_vendor_environment_token(text, match.start())
+            and not _follows_neutral_home_token(
+                text,
+                match.start(),
+                candidate,
+            )
         ):
             found.add(candidate)
     for match in _BARE_FILE_REFERENCE.finditer(text):
@@ -261,6 +266,17 @@ def _follows_vendor_environment_token(text: str, start: int) -> bool:
         text[:start],
         re.IGNORECASE,
     ) is not None
+
+
+def _follows_neutral_home_token(
+    text: str,
+    start: int,
+    reference: str,
+) -> bool:
+    return (
+        re.match(r"^[\\/]\.agents[\\/]", reference) is not None
+        and text[:start].endswith("~")
+    )
 
 
 def _looks_like_bare_reference(text: str, start: int) -> bool:
