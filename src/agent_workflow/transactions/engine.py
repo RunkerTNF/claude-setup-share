@@ -45,6 +45,8 @@ def apply_plan(plan: TransactionPlan) -> TransactionJournal:
         staging_parent = _ensure_internal_directory(workflow_root / "staging")
         journal_parent = _ensure_internal_directory(workflow_root / "journals")
         backup_root = backup_parent / transaction_id
+        journal_path = journal_parent / f"{transaction_id}.json"
+        _claim_transaction_namespace(backup_root, staging_parent / transaction_id, journal_path)
         sources = tuple(
             backup.BackupSource(item.operation.root_id, item.operation.path, item.target, item.existed, item.before_sha256)
             for item in resolved_operations
@@ -65,7 +67,6 @@ def apply_plan(plan: TransactionPlan) -> TransactionJournal:
             )
             for item in resolved_operations
         )
-        journal_path = journal_parent / f"{transaction_id}.json"
         journal = TransactionJournal(
             schema_version=1,
             transaction_id=transaction_id,
@@ -79,7 +80,7 @@ def apply_plan(plan: TransactionPlan) -> TransactionJournal:
             journal_path=str(journal_path),
             warnings=warnings,
         )
-        _write_journal(journal)
+        _write_journal(journal, exclusive=True)
         backup.verify_backup(backup_root, sources)
         _revalidate_complete_plan(plan, resolved_operations)
         committing_started = False
@@ -306,6 +307,12 @@ def _create_stage_root(parent: Path, transaction_id: str, label: str) -> Path:
     return root
 
 
+def _claim_transaction_namespace(backup_root: Path, staging_root: Path, journal_path: Path) -> None:
+    existing = [path for path in (backup_root, staging_root, journal_path) if path.exists() or path.is_symlink()]
+    if existing:
+        raise BackupError(f"transaction namespace already exists: {existing[0]}")
+
+
 def _stage_writes(stage_root: Path, operations: Iterable[_ResolvedOperation]) -> dict[tuple[str, str], Path]:
     staged: dict[tuple[str, str], Path] = {}
     for item in operations:
@@ -419,10 +426,20 @@ def _cleanup_empty_parents(start: Path, boundary: Path) -> None:
         current = current.parent
 
 
-def _write_journal(journal: TransactionJournal) -> None:
+def _write_journal(journal: TransactionJournal, *, exclusive: bool = False) -> None:
     path = Path(journal.journal_path)
     if path.is_symlink():
         raise UnsafePathError(f"journal path is a symlink: {path}")
+    if exclusive:
+        temporary = path.with_name(f".{path.name}.{uuid4()}.tmp")
+        try:
+            _write_fsynced(temporary, journal.to_json().encode("utf-8"))
+            os.link(temporary, path)
+        except FileExistsError as error:
+            raise BackupError(f"transaction namespace already exists: {path}") from error
+        finally:
+            temporary.unlink(missing_ok=True)
+        return
     temporary = path.with_name(f".{path.name}.{uuid4()}.tmp")
     _write_fsynced(temporary, journal.to_json().encode("utf-8"))
     os.replace(temporary, path)

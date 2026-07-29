@@ -2,6 +2,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+from uuid import UUID
 
 import pytest
 
@@ -311,9 +312,9 @@ def test_recovery_journal_failure_never_masks_commit_failure(tmp_path: Path, mon
     def fail_commit(source: Path | str, destination: Path | str) -> None:
         if Path(destination) == second: raise OSError("original commit failure")
         real_replace(source, destination)
-    def fail_recovery_status(journal: object) -> None:
+    def fail_recovery_status(journal: object, **kwargs: object) -> None:
         if getattr(journal, "status") == "rolling_back": raise OSError("journal recovery failure")
-        real_write(journal)
+        real_write(journal, **kwargs)
     monkeypatch.setattr(engine.os, "replace", fail_commit)
     monkeypatch.setattr(engine, "_write_journal", fail_recovery_status)
     with pytest.raises(OSError, match="original commit failure"):
@@ -442,3 +443,50 @@ def test_automatic_restore_parent_symlink_attack_is_recoverable(tmp_path: Path, 
     monkeypatch.setattr(engine.os, "replace", real_replace); monkeypatch.setattr(engine, "_create_stage_root", real_stage)
     rollback_transaction(journals[0])
     assert first.read_bytes() == b"first before" and second.read_bytes() == b"second before"
+
+
+@pytest.mark.parametrize("member", ("backup", "staging", "journal"))
+def test_apply_rejects_preexisting_transaction_namespace_without_debris(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, member: str) -> None:
+    root = tmp_path / ".agents"; root.mkdir()
+    transaction_id = "11111111-1111-1111-1111-111111111111"
+    workflow = root / "workflow"
+    backup_path = workflow / "backups" / transaction_id
+    staging_path = workflow / "staging" / transaction_id
+    journal_path = workflow / "journals" / f"{transaction_id}.json"
+    selected = {"backup": backup_path, "staging": staging_path, "journal": journal_path}[member]
+    if member == "journal":
+        selected.parent.mkdir(parents=True); selected.write_bytes(b"prior recovery evidence")
+    else:
+        selected.mkdir(parents=True); (selected / "marker").write_bytes(b"owned")
+    from agent_workflow.transactions import engine
+    monkeypatch.setattr(engine, "uuid4", lambda: UUID(transaction_id))
+
+    with pytest.raises(BackupError, match="namespace"):
+        apply_plan(make_plan(root, None))
+
+    assert selected.is_file() and selected.read_bytes() == b"prior recovery evidence" if member == "journal" else (selected / "marker").read_bytes() == b"owned"
+    assert not backup_path.exists() if member != "backup" else True
+    assert not staging_path.exists() if member != "staging" else True
+    assert not journal_path.exists() if member != "journal" else True
+
+
+@pytest.mark.parametrize("failure_point", ("write", "flush", "fsync", "fstat"))
+def test_partial_lock_acquisition_cleans_owned_lock_and_can_retry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure_point: str) -> None:
+    from agent_workflow.transactions import lock as lock_module
+    path = tmp_path / ".workflow.lock"
+    if failure_point in {"write", "flush"}:
+        method = "_write_token" if failure_point == "write" else "_flush_token"
+        original = getattr(ScopeLock, method)
+        monkeypatch.setattr(ScopeLock, method, lambda *_args: (_ for _ in ()).throw(OSError(f"{failure_point} failed")))
+    else:
+        original = getattr(lock_module.os, failure_point)
+        monkeypatch.setattr(lock_module.os, failure_point, lambda *_args: (_ for _ in ()).throw(OSError(f"{failure_point} failed")))
+    with pytest.raises(OSError, match=failure_point):
+        ScopeLock(path).__enter__()
+    assert not path.exists()
+    if failure_point in {"write", "flush"}:
+        monkeypatch.setattr(ScopeLock, method, original)
+    else:
+        monkeypatch.setattr(lock_module.os, failure_point, original)
+    with ScopeLock(path):
+        assert path.exists()
