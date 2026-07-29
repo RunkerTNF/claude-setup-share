@@ -1,7 +1,7 @@
 # Agent-Agnostic Workflow Design
 
-**Date:** 2026-07-29  
-**Status:** Approved design, pending implementation plan  
+**Date:** 2026-07-29
+**Status:** Approved design, pending implementation plan
 **Working product name:** `agent-workflow`
 
 ## Summary
