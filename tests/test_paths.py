@@ -103,6 +103,26 @@ def test_target_root_symlink_escape_is_rejected(tmp_path: Path) -> None:
         )
 
 
+def test_symlink_ancestor_above_allowed_root_is_trusted(tmp_path: Path) -> None:
+    real_parent = tmp_path / "real"
+    allowed_root = real_parent / "managed"
+    alias = tmp_path / "alias"
+    allowed_root.mkdir(parents=True)
+    try:
+        alias.symlink_to(real_parent, target_is_directory=True)
+    except OSError:
+        pytest.skip("symlink creation is unavailable")
+
+    target = resolve_write_target(
+        "scope",
+        "file",
+        {"neutral": alias / "managed" / ".agents", "scope": alias / "managed"},
+        [alias / "managed"],
+    )
+
+    assert target == (allowed_root / "file").resolve()
+
+
 def test_hashing_returns_lowercase_digest_and_missing_file_is_none(tmp_path: Path) -> None:
     file_path = tmp_path / "content.bin"
     file_path.write_bytes(b"hello world")

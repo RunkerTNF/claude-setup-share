@@ -34,15 +34,14 @@ def resolve_write_target(
         raise ValueError(f"unknown root ID: {root_id}")
 
     normalized_path = normalize_relative_path(relative_path)
-    resolved_allowed_roots = tuple(root.resolve(strict=False) for root in allowed_roots)
+    logical_allowed_roots = tuple(_absolute_path(root) for root in allowed_roots)
+    resolved_allowed_roots = tuple(root.resolve(strict=False) for root in logical_allowed_roots)
     if not resolved_allowed_roots:
         raise ValueError("allowed roots must not be empty")
 
-    target_root = Path(target_roots[root_id])
-    if not target_root.is_absolute():
-        target_root = Path.cwd() / target_root
+    target_root = _absolute_path(target_roots[root_id])
     target = target_root.joinpath(*normalized_path.split("/"))
-    _reject_escaping_symlinks(target, resolved_allowed_roots)
+    _reject_escaping_symlinks(target, logical_allowed_roots, resolved_allowed_roots)
 
     resolved_target_root = target_root.resolve(strict=False)
     if not _is_within_any(resolved_target_root, resolved_allowed_roots):
@@ -76,13 +75,28 @@ def _is_within(path: Path, root: Path) -> bool:
     return True
 
 
-def _reject_escaping_symlinks(target: Path, allowed_roots: Sequence[Path]) -> None:
-    parts = target.parts
-    current = Path(target.anchor)
-    for part in parts[1:]:
+def _absolute_path(path: Path) -> Path:
+    path = Path(path)
+    return path if path.is_absolute() else Path.cwd() / path
+
+
+def _reject_escaping_symlinks(
+    target: Path,
+    logical_allowed_roots: Sequence[Path],
+    resolved_allowed_roots: Sequence[Path],
+) -> None:
+    boundaries = [
+        root for root in logical_allowed_roots if _is_within(target, root)
+    ]
+    if not boundaries:
+        return
+
+    boundary = max(boundaries, key=lambda root: len(root.parts))
+    current = boundary
+    for part in target.relative_to(boundary).parts:
         current /= part
         if current.is_symlink() and not _is_within_any(
-            current.resolve(strict=False), allowed_roots
+            current.resolve(strict=False), resolved_allowed_roots
         ):
             raise ValueError("symlink escapes allowed roots")
         if not current.exists() and not current.is_symlink():
