@@ -21,17 +21,43 @@ def bundled_resource_source(relative_path: str) -> Path | None:
 def _load_resource(relative_path: str) -> tuple[bytes, Path | None]:
     normalized = normalize_relative_path(relative_path)
     parts = normalized.split("/")
-    bundled = resources.files("agent_workflow").joinpath("_bundled", *parts)
+    bundled_root = resources.files("agent_workflow").joinpath("_bundled")
+    bundled = bundled_root.joinpath(*parts)
     if bundled.is_file():
+        _validate_filesystem_containment(bundled_root, bundled, "bundled resources")
         return bundled.read_bytes(), None
 
-    checkout_root = Path(__file__).resolve().parents[2]
+    checkout_root = _source_checkout_root()
+    if checkout_root is None:
+        raise FileNotFoundError(
+            f"no bundled resource and no valid source checkout fallback: {normalized}"
+        )
     candidate = checkout_root.joinpath(*parts)
-    resolved_candidate = candidate.resolve(strict=False)
-    try:
-        resolved_candidate.relative_to(checkout_root)
-    except ValueError as error:
-        raise ValueError("resource path escapes source checkout") from error
+    _validate_filesystem_containment(checkout_root, candidate, "source checkout")
     if not candidate.is_file():
         raise FileNotFoundError(f"resource not found: {normalized}")
     return candidate.read_bytes(), checkout_root
+
+
+def _source_checkout_root() -> Path | None:
+    module_path = Path(__file__).resolve(strict=False)
+    package_root = module_path.parent
+    source_root = package_root.parent
+    checkout_root = source_root.parent
+    if (
+        module_path.name != "resources.py"
+        or package_root.name != "agent_workflow"
+        or source_root.name != "src"
+        or not (checkout_root / "pyproject.toml").is_file()
+    ):
+        return None
+    return checkout_root
+
+
+def _validate_filesystem_containment(root: object, candidate: object, label: str) -> None:
+    if not isinstance(root, Path) or not isinstance(candidate, Path):
+        return
+    try:
+        candidate.resolve(strict=False).relative_to(root.resolve(strict=False))
+    except ValueError as error:
+        raise ValueError(f"resource path escapes {label}") from error

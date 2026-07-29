@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 
 from . import __version__
-from .hashing import sha256_bytes, sha256_file
+from .hashing import sha256_bytes
 from .manifest import WorkflowManifest
 from .model import Ownership, ProjectProfile, Scope
 from .paths import HostPaths, resolve_write_target
@@ -47,12 +48,14 @@ def plan_neutral_init(
     conflicts: list[str] = []
     for path, content, ownership in desired:
         target = resolve_write_target("neutral", path, target_roots, (scope_base,))
-        current_hash = _current_file_hash(target)
+        snapshot = _file_snapshot(target)
         key = f"neutral:{path}"
-        if current_hash is not None and content and not _is_safe_managed_file(
-            existing_manifest, key, current_hash
-        ):
-            kind = "managed output modified" if existing_manifest is not None else "unmanaged non-empty output"
+        if not _can_write(existing_manifest, key, snapshot):
+            kind = (
+                "managed output modified"
+                if existing_manifest is not None
+                else "unmanaged non-empty output"
+            )
             conflicts.append(f"{kind}: {key}")
             continue
         operations.append(
@@ -60,7 +63,7 @@ def plan_neutral_init(
                 root_id="neutral",
                 path=path,
                 content=content,
-                expected_sha256=current_hash,
+                expected_sha256=snapshot.sha256,
                 ownership=ownership,
             )
         )
@@ -83,7 +86,7 @@ def plan_neutral_init(
                 root_id="neutral",
                 path="manifest.json",
                 content=manifest.to_json().encode("utf-8"),
-                expected_sha256=_current_file_hash(manifest_path),
+                expected_sha256=_file_snapshot(manifest_path).sha256,
                 ownership=Ownership.GENERATED,
             )
         )
@@ -169,18 +172,29 @@ def _compatible(
     )
 
 
-def _current_file_hash(path: Path) -> str | None:
-    if not path.exists():
-        return None
-    if not path.is_file():
-        raise ValueError(f"output is not a file: {path}")
-    digest = sha256_file(path)
-    if digest is None:
-        raise ValueError(f"output disappeared while planning: {path}")
-    return digest
+@dataclass(frozen=True)
+class _FileSnapshot:
+    sha256: str | None
+    is_empty: bool
 
 
-def _is_safe_managed_file(
-    manifest: WorkflowManifest | None, key: str, current_hash: str
+def _file_snapshot(path: Path) -> _FileSnapshot:
+    try:
+        content = path.read_bytes()
+    except FileNotFoundError:
+        return _FileSnapshot(sha256=None, is_empty=True)
+    except IsADirectoryError as error:
+        raise ValueError(f"output is not a file: {path}") from error
+    except OSError as error:
+        raise ValueError(f"cannot read output while planning: {path}") from error
+    return _FileSnapshot(sha256=sha256_bytes(content), is_empty=not content)
+
+
+def _can_write(
+    manifest: WorkflowManifest | None, key: str, snapshot: _FileSnapshot
 ) -> bool:
-    return manifest is not None and manifest.generated_files.get(key) == current_hash
+    if snapshot.sha256 is None:
+        return True
+    if manifest is None:
+        return snapshot.is_empty
+    return manifest.generated_files.get(key) == snapshot.sha256

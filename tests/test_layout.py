@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+import agent_workflow.resources as resources_module
 from agent_workflow.layout import plan_neutral_init
 from agent_workflow.model import Ownership, ProjectProfile, Scope
 from agent_workflow.paths import HostPaths
@@ -122,6 +123,32 @@ def test_existing_unmanaged_nonempty_file_becomes_a_conflict(tmp_path: Path) -> 
     assert "manifest.json" not in operation_paths(plan)
 
 
+def test_existing_empty_unmanaged_rules_file_is_safe_to_initialize(tmp_path: Path) -> None:
+    paths = make_paths(tmp_path)
+    output = paths.home / ".agents" / "RULES.md"
+    output.parent.mkdir()
+    output.write_bytes(b"")
+
+    plan = plan_neutral_init(paths, Scope.GLOBAL, None, ())
+
+    rules_write = next(operation for operation in plan.operations if operation.path == "RULES.md")
+    assert rules_write.expected_sha256 == "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+
+
+def test_existing_unmanaged_nonempty_session_marker_becomes_a_conflict(tmp_path: Path) -> None:
+    paths = make_paths(tmp_path)
+    marker = paths.project_root / ".agents" / "sessions" / ".gitkeep"
+    marker.parent.mkdir(parents=True)
+    marker.write_text("personal session\n", encoding="utf-8")
+
+    plan = plan_neutral_init(paths, Scope.PROJECT, ProjectProfile.LOCAL, ())
+
+    assert "sessions/.gitkeep" not in operation_paths(plan)
+    assert plan.conflicts == (
+        "unmanaged non-empty output: neutral:sessions/.gitkeep",
+    )
+
+
 def test_modified_managed_file_becomes_a_conflict(tmp_path: Path) -> None:
     paths = make_paths(tmp_path)
     initial = plan_neutral_init(paths, Scope.GLOBAL, None, ())
@@ -137,6 +164,24 @@ def test_modified_managed_file_becomes_a_conflict(tmp_path: Path) -> None:
     assert "RULES.md" not in operation_paths(plan)
     assert plan.conflicts == ("managed output modified: neutral:RULES.md",)
     assert "manifest.json" not in operation_paths(plan)
+
+
+def test_modified_managed_nonempty_session_marker_becomes_a_conflict(tmp_path: Path) -> None:
+    paths = make_paths(tmp_path)
+    initial = plan_neutral_init(paths, Scope.PROJECT, ProjectProfile.LOCAL, ())
+    root = paths.project_root / ".agents"
+    for operation in initial.operations:
+        target = root / operation.path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(operation.content_bytes())
+    (root / "sessions" / ".gitkeep").write_text("personal session\n", encoding="utf-8")
+
+    plan = plan_neutral_init(paths, Scope.PROJECT, ProjectProfile.LOCAL, ())
+
+    assert "sessions/.gitkeep" not in operation_paths(plan)
+    assert plan.conflicts == (
+        "managed output modified: neutral:sessions/.gitkeep",
+    )
 
 
 def test_invalid_existing_manifest_blocks_planning(tmp_path: Path) -> None:
@@ -157,3 +202,38 @@ def test_resource_loader_rejects_unsafe_paths(path: str) -> None:
 
 def test_resource_loader_reads_source_checkout_template() -> None:
     assert load_bundled_resource("templates/core/global-rules.md")
+
+
+def test_resource_loader_rejects_bundled_symlink_escape(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    package_root = tmp_path / "package"
+    bundled_root = package_root / "_bundled" / "templates" / "core"
+    bundled_root.mkdir(parents=True)
+    outside = tmp_path / "outside.md"
+    outside.write_text("outside", encoding="utf-8")
+    link = bundled_root / "global-rules.md"
+    try:
+        link.symlink_to(outside)
+    except OSError:
+        pytest.skip("symlink creation is unavailable")
+    monkeypatch.setattr(resources_module.resources, "files", lambda _: package_root)
+
+    with pytest.raises(ValueError, match="escapes bundled resources"):
+        load_bundled_resource("templates/core/global-rules.md")
+
+
+def test_resource_loader_does_not_infer_source_checkout_from_installed_location(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    installed_package = tmp_path / "site-packages" / "agent_workflow"
+    installed_package.mkdir(parents=True)
+    (tmp_path / "templates" / "core").mkdir(parents=True)
+    (tmp_path / "templates" / "core" / "global-rules.md").write_text(
+        "unrelated", encoding="utf-8"
+    )
+    monkeypatch.setattr(resources_module.resources, "files", lambda _: installed_package)
+    monkeypatch.setattr(resources_module, "__file__", installed_package / "resources.py")
+
+    with pytest.raises(FileNotFoundError, match="no bundled resource"):
+        load_bundled_resource("templates/core/global-rules.md")
