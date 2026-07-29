@@ -1,0 +1,169 @@
+from __future__ import annotations
+
+from dataclasses import FrozenInstanceError, asdict
+import hashlib
+import json
+from pathlib import Path
+
+import pytest
+
+from agent_workflow.doctor import Diagnostic, run_doctor
+from agent_workflow.model import Severity
+
+
+def sha256(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def write_manifest(root: Path, *, generated_files: dict[str, str], bootstrap_root: str | None = None) -> None:
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "manifest.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "generator_version": "0.1.0",
+                "scope": "global",
+                "profile": None,
+                "targets": [],
+                "generated_files": generated_files,
+                "bootstrap_root": bootstrap_root,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def write_core(root: Path) -> None:
+    (root / "RULES.md").write_text("rules\n", encoding="utf-8")
+    memory = root / "memory" / "MEMORY.md"
+    memory.parent.mkdir()
+    memory.write_text("memory\n", encoding="utf-8")
+
+
+def test_diagnostic_is_immutable_and_json_friendly() -> None:
+    diagnostic = Diagnostic(Severity.BLOCKING, "example.code", "path", "message")
+
+    with pytest.raises(FrozenInstanceError):
+        diagnostic.code = "changed"  # type: ignore[misc]
+    assert asdict(diagnostic) == {
+        "severity": Severity.BLOCKING,
+        "code": "example.code",
+        "path": "path",
+        "message": "message",
+    }
+
+
+def test_doctor_reports_missing_and_drifted_canonical_generated_files(tmp_path: Path) -> None:
+    root = tmp_path / ".agents"
+    write_manifest(
+        root,
+        generated_files={
+            "neutral:entry.md": "a" * 64,
+            "neutral:missing.md": "b" * 64,
+        },
+    )
+    write_core(root)
+    (root / "entry.md").write_text("changed\n", encoding="utf-8")
+
+    diagnostics = run_doctor(root)
+
+    assert {item.code for item in diagnostics} >= {"generated.drift", "generated.missing"}
+
+
+def test_doctor_returns_diagnostic_for_invalid_manifest_without_raising(tmp_path: Path) -> None:
+    root = tmp_path / ".agents"
+    root.mkdir()
+    (root / "manifest.json").write_text("not json", encoding="utf-8")
+
+    assert {item.code for item in run_doctor(root)} == {"manifest.invalid", "core.missing"}
+
+
+def test_doctor_reports_missing_required_core_files(tmp_path: Path) -> None:
+    root = tmp_path / ".agents"
+    write_manifest(root, generated_files={})
+
+    assert {item.code for item in run_doctor(root)} == {"core.missing"}
+
+
+def test_doctor_excludes_manifest_and_ephemeral_bootstrap_references(tmp_path: Path) -> None:
+    root = tmp_path / ".agents"
+    bootstrap = str(tmp_path / "disposable-bootstrap")
+    write_manifest(root, generated_files={}, bootstrap_root=bootstrap)
+    write_core(root)
+    for relative_path in (
+        "workflow/backups/old.md",
+        "workflow/journals/old.md",
+        "workflow/staging/old.md",
+        "workflow/locks/old.md",
+    ):
+        path = root / relative_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(bootstrap, encoding="utf-8")
+
+    assert run_doctor(root) == ()
+
+
+def test_doctor_detects_normalized_bootstrap_reference_in_generated_text(tmp_path: Path) -> None:
+    root = tmp_path / ".agents"
+    bootstrap = str(tmp_path / "Disposable-Bootstrap")
+    write_manifest(
+        root,
+        generated_files={"neutral:entry.md": sha256(bootstrap.lower().replace("\\", "/"))},
+        bootstrap_root=bootstrap,
+    )
+    write_core(root)
+    (root / "entry.md").write_text(bootstrap.lower().replace("\\", "/"), encoding="utf-8")
+
+    assert [item.code for item in run_doctor(root)] == ["bootstrap.reference"]
+
+
+def test_doctor_detects_bootstrap_reference_in_generated_scope_file(tmp_path: Path) -> None:
+    root = tmp_path / ".agents"
+    bootstrap = str(tmp_path / "disposable-bootstrap")
+    entry = tmp_path / "AGENTS.md"
+    entry.write_text(bootstrap, encoding="utf-8")
+    write_manifest(
+        root,
+        generated_files={"scope:AGENTS.md": sha256(bootstrap)},
+        bootstrap_root=bootstrap,
+    )
+    write_core(root)
+
+    assert [item.code for item in run_doctor(root)] == ["bootstrap.reference"]
+
+
+def test_doctor_reports_escaping_managed_symlink_without_reading_it(tmp_path: Path) -> None:
+    root = tmp_path / ".agents"
+    root.mkdir()
+    outside = tmp_path / "outside.md"
+    outside.write_text("outside\n", encoding="utf-8")
+    try:
+        (root / "entry.md").symlink_to(outside)
+    except OSError:
+        pytest.skip("symlink creation is unavailable")
+    write_manifest(root, generated_files={"neutral:entry.md": sha256("outside\n")})
+    write_core(root)
+
+    assert "generated.path" in {item.code for item in run_doctor(root)}
+
+
+def test_doctor_lints_children_in_order_and_does_not_mutate_state(tmp_path: Path) -> None:
+    root = tmp_path / ".agents"
+    write_manifest(root, generated_files={})
+    write_core(root)
+    skills = root / "skills"
+    skills.mkdir()
+    (skills / "00-not-directory").write_text("not a skill", encoding="utf-8")
+    invalid = skills / "z-last"
+    invalid.mkdir()
+    (invalid / "SKILL.md").write_text("not frontmatter", encoding="utf-8")
+    before = {path.relative_to(root): path.read_bytes() for path in root.rglob("*") if path.is_file()}
+
+    first = run_doctor(root)
+    second = run_doctor(root)
+
+    assert first == second
+    assert list(first) == sorted(first, key=lambda item: (item.path, item.code, item.message))
+    assert {item.code for item in first} == {"portable.frontmatter", "skills.invalid-entry"}
+    after = {path.relative_to(root): path.read_bytes() for path in root.rglob("*") if path.is_file()}
+    assert after == before
