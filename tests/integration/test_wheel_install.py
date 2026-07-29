@@ -20,9 +20,11 @@ _WHEEL_RESOURCES = {
     "agent_workflow/adapters/codex/templates/project-agents-override.md",
     "agent_workflow/adapters/codex/templates/project-agents.md",
     "agent_workflow/adapters/claude/adapter.json",
+    "agent_workflow/adapters/claude/assets/statusline.js",
     "agent_workflow/adapters/claude/templates/global-claude.md",
     "agent_workflow/adapters/claude/templates/project-claude-local.md",
     "agent_workflow/adapters/claude/templates/project-claude.md",
+    "agent_workflow/adapters/claude/templates/settings.example.json",
 }
 
 

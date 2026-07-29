@@ -132,7 +132,7 @@ Credentials не переносятся, а внешний Python adapter не �
 
 - [safety и trust boundary](docs/safety.md);
 - [troubleshooting и recovery](docs/troubleshooting.md);
-- [live smoke для гарантированных agents](docs/live-smoke.md).
+- [release gate и live smoke](docs/release.md).
 
 ## Опциональные примеры
 
@@ -152,4 +152,4 @@ live smoke на заявленных версиях и заполненного 
 С чего продолжить:
 [adapter authoring](docs/adapter-authoring.md),
 [project profiles](docs/project-profiles.md),
-[release policy](docs/live-smoke.md).
+[release policy](docs/release.md).

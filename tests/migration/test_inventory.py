@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 from pathlib import Path
 
 import pytest
@@ -93,7 +94,9 @@ def test_manager_owned_generated_file_is_not_reimported(
                 "profile": None,
                 "targets": ["codex"],
                 "generated_files": {
-                    "scope:.codex/AGENTS.md": "0" * 64,
+                    "scope:.codex/AGENTS.md": hashlib.sha256(
+                        generated.read_bytes()
+                    ).hexdigest(),
                 },
                 "bootstrap_root": None,
             }
@@ -107,6 +110,84 @@ def test_manager_owned_generated_file_is_not_reimported(
     )
 
     assert inventory.artifacts == ()
+
+
+def test_manager_owned_generated_skill_directory_is_not_reimported(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "home"
+    wrapper = home / ".claude" / "skills" / "wrap" / "SKILL.md"
+    wrapper.parent.mkdir(parents=True)
+    wrapper.write_text(
+        "---\nname: wrap\ndescription: Generated wrapper.\n---\n",
+        encoding="utf-8",
+    )
+    neutral = home / ".agents"
+    neutral.mkdir()
+    digest = hashlib.sha256(wrapper.read_bytes()).hexdigest()
+    neutral.joinpath("manifest.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "generator_version": "0.1.0",
+                "scope": "global",
+                "profile": None,
+                "targets": ["claude"],
+                "generated_files": {
+                    "scope:.claude/skills/wrap/SKILL.md": digest,
+                },
+                "bootstrap_root": None,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    inventory = scan_migration_inventory(
+        fake_adapter_context(home=home, project=None),
+        AdapterRegistry.builtins().require(("claude",)),
+    )
+
+    assert inventory.artifacts == ()
+
+
+def test_manager_owned_path_with_hash_drift_is_scanned(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "home"
+    generated = home / ".codex" / "AGENTS.md"
+    generated.parent.mkdir(parents=True)
+    generated.write_text("User-modified rules.\n", encoding="utf-8")
+    neutral = home / ".agents"
+    neutral.mkdir()
+    neutral.joinpath("manifest.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "generator_version": "0.1.0",
+                "scope": "global",
+                "profile": None,
+                "targets": ["codex"],
+                "generated_files": {
+                    "scope:.codex/AGENTS.md": "0" * 64,
+                },
+                "bootstrap_root": None,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    inventory = scan_migration_inventory(
+        fake_adapter_context(home=home, project=None),
+        AdapterRegistry.builtins().require(("codex",)),
+    )
+
+    assert [item.relative_path for item in inventory.artifacts] == [
+        ".codex/AGENTS.md"
+    ]
+    assert any(
+        "managed file hash drift" in warning
+        for warning in inventory.warnings
+    )
 
 
 def test_escaping_declared_root_is_warned_and_skipped(

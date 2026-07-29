@@ -21,6 +21,8 @@ package-dir = {"" = "src"}
 agent_workflow = [
     "_bundled/templates/core/*.md",
     "adapters/*/adapter.json",
+    "adapters/*/assets/*.js",
+    "adapters/*/templates/*.json",
     "adapters/*/templates/*.md",
 ]
 
