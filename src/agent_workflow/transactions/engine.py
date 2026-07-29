@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
+import json
 import os
 from pathlib import Path
-import shutil
 from typing import Iterable, Mapping, Sequence
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from agent_workflow.errors import BackupError, ConflictError, SourceChangedError, UnsafePathError
 from agent_workflow.hashing import sha256_bytes, sha256_file
@@ -32,9 +32,10 @@ class _ResolvedOperation:
 @dataclass(frozen=True)
 class _NamespaceClaim:
     staging_root: Path
-    owner_path: Path
+    claim_path: Path
     journal_path: Path
     token: str
+    payload: Mapping[str, object]
 
 
 def apply_plan(plan: TransactionPlan) -> TransactionJournal:
@@ -55,21 +56,10 @@ def apply_plan(plan: TransactionPlan) -> TransactionJournal:
         journal_parent = _ensure_internal_directory(workflow_root / "journals")
         backup_root = backup_parent / transaction_id
         journal_path = journal_parent / f"{transaction_id}.json"
-        claim = _claim_transaction_namespace(backup_root, staging_parent / transaction_id, journal_path)
-        try:
-            _verify_namespace_claim(claim)
-        except Exception:
-            _release_namespace_claim(claim)
-            raise
         sources = tuple(
             backup.BackupSource(item.operation.root_id, item.operation.path, item.target, item.existed, item.before_sha256)
             for item in resolved_operations
         )
-        _, warnings = backup.create_backup(backup_root, sources)
-        backup.verify_backup(backup_root, sources)
-        stage_root = _create_stage_root(staging_parent, transaction_id, "apply")
-        staged = _stage_writes(stage_root, resolved_operations)
-        _revalidate_complete_plan(plan, resolved_operations)
         entries = tuple(
             JournalEntry(
                 root_id=item.operation.root_id,
@@ -81,6 +71,30 @@ def apply_plan(plan: TransactionPlan) -> TransactionJournal:
             )
             for item in resolved_operations
         )
+        claim = _claim_transaction_namespace(
+            backup_root,
+            staging_parent / transaction_id,
+            journal_path,
+            transaction_id=transaction_id,
+            token=str(uuid4()),
+            scope_root=str(scope_root),
+            target_roots=dict(plan.target_roots),
+            allowed_roots=plan.allowed_roots,
+            entries=entries,
+        )
+        try:
+            _verify_namespace_claim(claim)
+            _, warnings = backup.create_backup(backup_root, sources)
+            backup.verify_backup(backup_root, sources)
+            stage_root = _create_stage_root(staging_parent, transaction_id, "apply")
+            staged = _stage_writes(stage_root, resolved_operations)
+            _revalidate_complete_plan(plan, resolved_operations)
+        except Exception as preparation_error:
+            try:
+                _write_claim(claim, "prepare_failed")
+            except Exception as claim_error:
+                preparation_error.add_note(f"could not persist prepare_failed claim: {claim_error}")
+            raise
         journal = TransactionJournal(
             schema_version=1,
             transaction_id=transaction_id,
@@ -96,8 +110,11 @@ def apply_plan(plan: TransactionPlan) -> TransactionJournal:
         )
         try:
             _publish_initial_journal(journal, claim)
-        except Exception:
-            _cleanup_unpublished_transaction(claim, backup_root, sources)
+        except Exception as preparation_error:
+            try:
+                _write_claim(claim, "prepare_failed")
+            except Exception as claim_error:
+                preparation_error.add_note(f"could not persist prepare_failed claim: {claim_error}")
             raise
         backup.verify_backup(backup_root, sources)
         _revalidate_complete_plan(plan, resolved_operations)
@@ -325,44 +342,106 @@ def _create_stage_root(parent: Path, transaction_id: str, label: str) -> Path:
     return root
 
 
-def _claim_transaction_namespace(backup_root: Path, staging_root: Path, journal_path: Path) -> _NamespaceClaim:
+def _claim_transaction_namespace(
+    backup_root: Path,
+    staging_root: Path,
+    journal_path: Path,
+    *,
+    transaction_id: str,
+    token: str,
+    scope_root: str,
+    target_roots: Mapping[str, str],
+    allowed_roots: Sequence[str],
+    entries: tuple[JournalEntry, ...],
+) -> _NamespaceClaim:
     existing = [path for path in (backup_root, staging_root, journal_path) if path.exists() or path.is_symlink()]
     if existing:
         raise BackupError(f"transaction namespace already exists: {existing[0]}")
-    token = str(uuid4())
+    payload: dict[str, object] = {
+        "schema_version": 1,
+        "status": "preparing",
+        "transaction_id": transaction_id,
+        "token": token,
+        "scope_root": scope_root,
+        "target_roots": dict(target_roots),
+        "allowed_roots": list(allowed_roots),
+        "backup_root": str(backup_root),
+        "staging_root": str(staging_root),
+        "journal_path": str(journal_path),
+        "entries": [entry.to_payload() for entry in entries],
+    }
+    claim_path = staging_root / "claim.json"
+    claim = _NamespaceClaim(staging_root, claim_path, journal_path, token, payload)
     try:
         staging_root.mkdir()
-        owner_path = staging_root / ".owner"
-        _write_fsynced(owner_path, token.encode("ascii"))
+        _write_fsynced(claim_path, _claim_json(payload))
+        _read_claim(claim_path)
     except Exception:
-        claim = _NamespaceClaim(staging_root, staging_root / ".owner", journal_path, token)
-        _release_namespace_claim(claim)
         raise
-    return _NamespaceClaim(staging_root, owner_path, journal_path, token)
+    return claim
 
 
 def _verify_namespace_claim(claim: _NamespaceClaim, *, allow_apply: bool = False) -> None:
-    if claim.owner_path.read_text(encoding="ascii") != claim.token:
+    payload = _read_claim(claim.claim_path)
+    if payload.get("token") != claim.token or payload.get("transaction_id") != claim.payload["transaction_id"]:
         raise BackupError("transaction namespace ownership changed")
     if claim.journal_path.exists() or claim.journal_path.is_symlink():
         raise BackupError("transaction namespace journal was claimed by another writer")
-    allowed = {claim.owner_path}
+    allowed = {claim.claim_path}
     if allow_apply:
         allowed.add(claim.staging_root / "apply")
     if set(claim.staging_root.iterdir()) != allowed:
         raise BackupError("transaction namespace contains racing artifacts")
 
 
-def _release_namespace_claim(claim: _NamespaceClaim) -> None:
+def _claim_json(payload: Mapping[str, object]) -> bytes:
+    return (json.dumps(dict(payload), indent=2, sort_keys=True) + "\n").encode("utf-8")
+
+
+def _read_claim(path: Path) -> dict[str, object]:
+    required = {"schema_version", "status", "transaction_id", "token", "scope_root", "target_roots", "allowed_roots", "backup_root", "staging_root", "journal_path", "entries"}
     try:
-        if claim.owner_path.read_text(encoding="ascii") == claim.token:
-            claim.owner_path.unlink()
-    except (OSError, UnicodeError):
-        pass
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise BackupError("invalid transaction preparation claim") from error
+    if not isinstance(payload, dict) or set(payload) != required or type(payload["schema_version"]) is not int or payload["schema_version"] != 1 or payload["status"] not in {"preparing", "prepare_failed"}:
+        raise BackupError("invalid transaction preparation claim")
+    if (
+        not all(isinstance(payload[key], str) for key in ("transaction_id", "token", "scope_root", "backup_root", "staging_root", "journal_path"))
+        or not isinstance(payload["target_roots"], dict)
+        or not all(isinstance(key, str) and isinstance(value, str) for key, value in payload["target_roots"].items())
+        or not isinstance(payload["allowed_roots"], list)
+        or not all(isinstance(value, str) for value in payload["allowed_roots"])
+        or not isinstance(payload["entries"], list)
+    ):
+        raise BackupError("invalid transaction preparation claim")
     try:
-        claim.staging_root.rmdir()
-    except OSError:
-        pass
+        UUID(payload["transaction_id"])
+        UUID(payload["token"])
+    except ValueError as error:
+        raise BackupError("invalid transaction preparation claim") from error
+    scope_root = _lexical_path(Path(payload["scope_root"]))
+    transaction_id = payload["transaction_id"]
+    if (
+        _lexical_path(Path(payload["backup_root"])) != scope_root / "workflow" / "backups" / transaction_id
+        or _lexical_path(Path(payload["staging_root"])) != scope_root / "workflow" / "staging" / transaction_id
+        or _lexical_path(Path(payload["journal_path"])) != scope_root / "workflow" / "journals" / f"{transaction_id}.json"
+    ):
+        raise BackupError("invalid transaction preparation claim")
+    tuple(JournalEntry.from_payload(item) for item in payload["entries"])
+    return payload
+
+
+def _write_claim(claim: _NamespaceClaim, status: str) -> None:
+    payload = dict(claim.payload)
+    payload["status"] = status
+    temporary = claim.claim_path.with_name(f".{claim.claim_path.name}.{uuid4()}.tmp")
+    try:
+        _write_fsynced(temporary, _claim_json(payload))
+        _read_claim(temporary)
+        os.replace(temporary, claim.claim_path)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def _publish_initial_journal(journal: TransactionJournal, claim: _NamespaceClaim) -> None:
@@ -377,7 +456,10 @@ def _publish_initial_journal(journal: TransactionJournal, claim: _NamespaceClaim
         _sync_initial_journal(output)
         output.close()
         output = None
-        claim.owner_path.unlink(missing_ok=True)
+        restored = TransactionJournal.from_json(claim.journal_path.read_text(encoding="utf-8"))
+        if restored.status != "prepared" or restored.transaction_id != journal.transaction_id:
+            raise BackupError("published journal validation failed")
+        claim.claim_path.unlink(missing_ok=True)
     except FileExistsError as error:
         raise BackupError(f"transaction namespace already exists: {claim.journal_path}") from error
     except Exception:
@@ -395,28 +477,6 @@ def _publish_initial_journal(journal: TransactionJournal, claim: _NamespaceClaim
 def _sync_initial_journal(output: object) -> None:
     output.flush()
     os.fsync(output.fileno())
-
-
-def _cleanup_unpublished_transaction(claim: _NamespaceClaim, backup_root: Path, sources: tuple[backup.BackupSource, ...]) -> None:
-    try:
-        _verify_namespace_claim(claim, allow_apply=True)
-        inventory = backup.verify_backup(backup_root, sources)
-        allowed_files = {backup_root / "inventory.json"}
-        allowed_files.update(backup_root / entry.backup_path for entry in inventory if entry.backup_path is not None)
-        foreign_files = [path for path in backup_root.rglob("*") if path.is_file() and path not in allowed_files]
-    except Exception:
-        return
-    if foreign_files:
-        for path in allowed_files:
-            path.unlink(missing_ok=True)
-        for directory in sorted((path for path in backup_root.rglob("*") if path.is_dir()), key=lambda path: len(path.parts), reverse=True):
-            try:
-                directory.rmdir()
-            except OSError:
-                pass
-    else:
-        shutil.rmtree(backup_root)
-    shutil.rmtree(claim.staging_root)
 
 
 def _stage_writes(stage_root: Path, operations: Iterable[_ResolvedOperation]) -> dict[tuple[str, str], Path]:

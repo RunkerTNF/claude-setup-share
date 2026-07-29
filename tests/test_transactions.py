@@ -531,15 +531,16 @@ def test_namespace_race_preserves_evidence_and_leaves_no_owned_debris(tmp_path: 
     assert b"racer" in evidence.read_bytes()
 
 
-def test_initial_journal_publication_failure_cleans_owned_artifacts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_initial_journal_publication_failure_preserves_backup_and_valid_claim(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     root = tmp_path / ".agents"; root.mkdir(); target = root / "RULES.md"
     from agent_workflow.transactions import engine
     monkeypatch.setattr(engine, "_sync_initial_journal", lambda _output: (_ for _ in ()).throw(OSError("exclusive publication unavailable")))
     with pytest.raises(OSError, match="publication unavailable"):
         apply_plan(make_plan(root, None))
     assert not target.exists()
-    assert not list((root / "workflow" / "backups").iterdir())
-    assert not list((root / "workflow" / "staging").iterdir())
+    assert (next((root / "workflow" / "backups").iterdir()) / "inventory.json").exists()
+    claim = json.loads(next((root / "workflow" / "staging").rglob("claim.json")).read_text())
+    assert claim["schema_version"] == 1 and claim["status"] == "prepare_failed"
     assert not list((root / "workflow" / "journals").iterdir())
 
 
@@ -555,4 +556,35 @@ def test_unpublished_cleanup_preserves_foreign_backup_content(tmp_path: Path, mo
         apply_plan(make_plan(root, None))
     backup_root = next((root / "workflow" / "backups").iterdir())
     assert (backup_root / "foreign").read_bytes() == b"foreign"
-    assert not (backup_root / "inventory.json").exists()
+    assert (backup_root / "inventory.json").exists()
+
+
+@pytest.mark.parametrize("failure_point", ("backup_write", "backup_verify", "stage_write", "revalidate", "journal_publish"))
+def test_prepublication_failure_preserves_original_error_backup_and_strict_claim(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure_point: str) -> None:
+    root = tmp_path / ".agents"; root.mkdir(); target = root / "RULES.md"; target.write_bytes(b"before")
+    from agent_workflow.transactions import engine, backup as backup_module
+    if failure_point == "backup_write":
+        real = backup_module.create_backup
+        def create_then_fail(*args: object, **kwargs: object) -> object:
+            real(*args, **kwargs); raise OSError("backup_write failure")
+        monkeypatch.setattr(backup_module, "create_backup", create_then_fail)
+    elif failure_point == "backup_verify":
+        monkeypatch.setattr(backup_module, "verify_backup", lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("backup_verify failure")))
+    elif failure_point == "stage_write":
+        real = engine._stage_writes
+        def stage_then_fail(*args: object, **kwargs: object) -> object:
+            real(*args, **kwargs); raise OSError("stage_write failure")
+        monkeypatch.setattr(engine, "_stage_writes", stage_then_fail)
+    elif failure_point == "revalidate":
+        monkeypatch.setattr(engine, "_revalidate_complete_plan", lambda *_args: (_ for _ in ()).throw(OSError("revalidate failure")))
+    else:
+        monkeypatch.setattr(engine, "_sync_initial_journal", lambda _output: (_ for _ in ()).throw(OSError("journal_publish failure")))
+    with pytest.raises(OSError, match=f"{failure_point} failure"):
+        apply_plan(make_plan(root, sha256_file(target)))
+    assert target.read_bytes() == b"before"
+    claim_path = next((root / "workflow" / "staging").rglob("claim.json"))
+    claim = json.loads(claim_path.read_text())
+    assert set(claim) == {"schema_version", "status", "transaction_id", "token", "scope_root", "target_roots", "allowed_roots", "backup_root", "staging_root", "journal_path", "entries"}
+    assert claim["status"] == "prepare_failed" and len(claim["entries"]) == 1
+    backup_dirs = list((root / "workflow" / "backups").iterdir())
+    assert backup_dirs and (backup_dirs[0] / "inventory.json").exists()
