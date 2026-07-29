@@ -36,10 +36,14 @@ class LoadedSkill:
     accepted_tags: frozenset[str]
 
 
-def load_skill(repo_root: Path, name: str) -> LoadedSkill:
-    source = (
+def skill_text(repo_root: Path, name: str) -> str:
+    return (
         repo_root / "skills" / name / "SKILL.md"
     ).read_text(encoding="utf-8")
+
+
+def load_skill(repo_root: Path, name: str) -> LoadedSkill:
+    source = skill_text(repo_root, name)
     parsed_name, description, body = parse_portable_skill_frontmatter(
         source
     )

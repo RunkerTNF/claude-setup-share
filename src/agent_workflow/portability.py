@@ -216,7 +216,7 @@ def _references(text: str) -> tuple[str, ...]:
             and not _is_vendor_path(candidate)
             and not _is_neutral_runtime_path(candidate)
             and not _follows_vendor_environment_token(text, match.start())
-            and not _follows_neutral_home_token(
+            and not _follows_home_runtime_token(
                 text,
                 match.start(),
                 candidate,
@@ -278,15 +278,21 @@ def _follows_vendor_environment_token(text: str, start: int) -> bool:
     ) is not None
 
 
-def _follows_neutral_home_token(
+def _follows_home_runtime_token(
     text: str,
     start: int,
     reference: str,
 ) -> bool:
-    return (
-        re.match(r"^[\\/]\.agents[\\/]", reference) is not None
-        and text[:start].endswith("~")
-    )
+    if (
+        not text[:start].endswith("~")
+        or not reference.startswith(("/", "\\"))
+    ):
+        return False
+    try:
+        normalize_relative_path(reference.lstrip("/\\"))
+    except ValueError:
+        return False
+    return True
 
 
 def _looks_like_bare_reference(text: str, start: int) -> bool:
