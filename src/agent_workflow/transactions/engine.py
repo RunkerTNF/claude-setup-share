@@ -80,6 +80,8 @@ def apply_plan(plan: TransactionPlan) -> TransactionJournal:
             warnings=warnings,
         )
         _write_journal(journal)
+        backup.verify_backup(backup_root, sources)
+        _revalidate_complete_plan(plan, resolved_operations)
         committing_started = False
         try:
             committing_started = True
@@ -100,15 +102,24 @@ def apply_plan(plan: TransactionPlan) -> TransactionJournal:
         except Exception as original_error:
             if committing_started:
                 rolling_back = journal.with_status("rolling_back")
-                _write_journal(rolling_back)
+                try:
+                    _write_journal(rolling_back)
+                except Exception as recovery_error:
+                    original_error.add_note(f"could not persist rolling_back: {recovery_error}")
                 try:
                     _restore_from_backup(scope_root, staging_parent, transaction_id, resolved_operations, backup_root, sources)
                 except Exception as cleanup_error:
-                    _write_journal(rolling_back.with_status("rollback_failed"))
                     original_error.add_note(f"rollback cleanup failed: {cleanup_error}")
+                    try:
+                        _write_journal(rolling_back.with_status("rollback_failed"))
+                    except Exception as recovery_error:
+                        original_error.add_note(f"could not persist rollback_failed: {recovery_error}")
                 else:
-                    _write_journal(rolling_back.with_status("rolled_back"))
-            raise original_error
+                    try:
+                        _write_journal(rolling_back.with_status("rolled_back"))
+                    except Exception as recovery_error:
+                        original_error.add_note(f"could not persist rolled_back: {recovery_error}")
+            raise
 
 
 def rollback_transaction(journal_path: Path) -> TransactionJournal:
@@ -119,7 +130,7 @@ def rollback_transaction(journal_path: Path) -> TransactionJournal:
     journal = TransactionJournal.from_json(supplied_path.read_text(encoding="utf-8"))
     if supplied_path != _lexical_path(Path(journal.journal_path)):
         raise ValueError("journal path does not match the transaction location")
-    if journal.status not in {"committed", "rolling_back", "rollback_failed"}:
+    if journal.status not in {"committed", "committing", "rolling_back", "rollback_failed"}:
         raise ConflictError(f"transaction is not committed: {journal.status}")
     scope_root = Path(journal.scope_root)
     _ensure_scope_root(scope_root)
@@ -141,7 +152,7 @@ def rollback_transaction(journal_path: Path) -> TransactionJournal:
         for entry, target in resolved:
             current = _safe_sha256(target)
             allowed_states = {entry.after_sha256}
-            if journal.status in {"rolling_back", "rollback_failed"}:
+            if journal.status in {"committing", "rolling_back", "rollback_failed"}:
                 allowed_states.add(entry.before_sha256)
             if current not in allowed_states:
                 raise SourceChangedError(f"rollback refused due to drift: {target}")

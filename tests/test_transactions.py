@@ -296,3 +296,36 @@ def test_rollback_rejects_symlinked_retained_storage_before_use(tmp_path: Path, 
     with pytest.raises(UnsafePathError, match="symlink"):
         rollback_transaction(Path(journal.journal_path))
     assert not list(outside.iterdir())
+
+
+def test_recovery_journal_failure_never_masks_commit_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    root = tmp_path / ".agents"; root.mkdir()
+    first, second = root / "first", root / "second"
+    first.write_bytes(b"first"); second.write_bytes(b"second")
+    plan = TransactionPlan.new(scope_root=str(root), target_roots={"neutral": str(root), "scope": str(tmp_path)}, allowed_roots=(str(tmp_path),), operations=(
+        WriteOperation.from_bytes("neutral", "first", b"new first", sha256_file(first), Ownership.CANONICAL),
+        WriteOperation.from_bytes("neutral", "second", b"new second", sha256_file(second), Ownership.CANONICAL),
+    ))
+    from agent_workflow.transactions import engine
+    real_replace, real_write = os.replace, engine._write_journal
+    def fail_commit(source: Path | str, destination: Path | str) -> None:
+        if Path(destination) == second: raise OSError("original commit failure")
+        real_replace(source, destination)
+    def fail_recovery_status(journal: object) -> None:
+        if getattr(journal, "status") == "rolling_back": raise OSError("journal recovery failure")
+        real_write(journal)
+    monkeypatch.setattr(engine.os, "replace", fail_commit)
+    monkeypatch.setattr(engine, "_write_journal", fail_recovery_status)
+    with pytest.raises(OSError, match="original commit failure"):
+        apply_plan(plan)
+
+
+def test_manual_rollback_resumes_committing_journal(tmp_path: Path) -> None:
+    root = tmp_path / ".agents"; root.mkdir()
+    rules = root / "RULES.md"; rules.write_bytes(b"old")
+    journal = apply_plan(make_plan(root, sha256_file(rules)))
+    path = Path(journal.journal_path)
+    payload = json.loads(path.read_text(encoding="utf-8")); payload["status"] = "committing"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    rollback_transaction(path)
+    assert rules.read_bytes() == b"old"
