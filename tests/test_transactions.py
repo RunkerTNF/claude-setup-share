@@ -1,14 +1,16 @@
 import json
 import os
 from pathlib import Path
+import shutil
 
 import pytest
 
-from agent_workflow.errors import BackupError, ConflictError, SourceChangedError, TransactionBusyError
+from agent_workflow.errors import BackupError, ConflictError, SourceChangedError, TransactionBusyError, UnsafePathError
 from agent_workflow.hashing import sha256_file
 from agent_workflow.model import Ownership
 from agent_workflow.plan import DeleteOperation, TransactionPlan, WriteOperation
 from agent_workflow.transactions.engine import apply_plan, rollback_transaction
+from agent_workflow.transactions.lock import ScopeLock
 
 
 def make_plan(root: Path, expected: str | None, *, content: bytes = b"# Rules\n", conflicts: tuple[str, ...] = ()) -> TransactionPlan:
@@ -201,3 +203,96 @@ def test_rollback_removes_target_that_did_not_exist_before_apply(tmp_path: Path)
     rollback_transaction(Path(journal.journal_path))
 
     assert not rules.exists()
+
+
+@pytest.mark.parametrize("path", ("workflow", "workflow/backups/data", "workflow/journals/entry.json"))
+def test_transaction_storage_and_its_ancestors_are_reserved(tmp_path: Path, path: str) -> None:
+    root = tmp_path / ".agents"
+    operation = WriteOperation.from_bytes("neutral", path, b"x", None, Ownership.CANONICAL)
+    plan = TransactionPlan.new(scope_root=str(root), target_roots={"neutral": str(root), "scope": str(tmp_path)}, allowed_roots=(str(tmp_path),), operations=(operation,))
+
+    with pytest.raises(UnsafePathError, match="transaction storage"):
+        apply_plan(plan)
+
+
+@pytest.mark.parametrize("path", ("workflow/manager/state.json", "workflow/adapters/codex.json", "workflow/templates/rules.md"))
+def test_manager_workflow_siblings_remain_writable(tmp_path: Path, path: str) -> None:
+    root = tmp_path / ".agents"
+    operation = WriteOperation.from_bytes("neutral", path, b"x", None, Ownership.CANONICAL)
+    plan = TransactionPlan.new(scope_root=str(root), target_roots={"neutral": str(root), "scope": str(tmp_path)}, allowed_roots=(str(tmp_path),), operations=(operation,))
+
+    apply_plan(plan)
+
+    assert (root / path).read_bytes() == b"x"
+
+
+def test_full_preflight_blocks_late_drift_without_modifying_earlier_target(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    root = tmp_path / ".agents"
+    root.mkdir()
+    first, second = root / "first.txt", root / "second.txt"
+    first.write_bytes(b"first")
+    second.write_bytes(b"second")
+    plan = TransactionPlan.new(scope_root=str(root), target_roots={"neutral": str(root), "scope": str(tmp_path)}, allowed_roots=(str(tmp_path),), operations=(
+        WriteOperation.from_bytes("neutral", "first.txt", b"new first", sha256_file(first), Ownership.CANONICAL),
+        WriteOperation.from_bytes("neutral", "second.txt", b"new second", sha256_file(second), Ownership.CANONICAL),
+    ))
+    from agent_workflow.transactions import engine
+    original_stage = engine._stage_writes
+
+    def stage_then_drift(*args: object, **kwargs: object) -> object:
+        result = original_stage(*args, **kwargs)
+        second.write_bytes(b"drift")
+        return result
+
+    monkeypatch.setattr(engine, "_stage_writes", stage_then_drift)
+    with pytest.raises(SourceChangedError):
+        apply_plan(plan)
+    assert first.read_bytes() == b"first"
+
+
+def test_apply_rejects_parent_symlink_swapped_after_staging(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    root, outside = tmp_path / ".agents", tmp_path / "outside"
+    root.mkdir(); outside.mkdir()
+    operation = WriteOperation.from_bytes("neutral", "new/file.txt", b"safe", None, Ownership.CANONICAL)
+    plan = TransactionPlan.new(scope_root=str(root), target_roots={"neutral": str(root), "scope": str(tmp_path)}, allowed_roots=(str(tmp_path),), operations=(operation,))
+    from agent_workflow.transactions import engine
+    original_stage = engine._stage_writes
+    def stage_then_swap(*args: object, **kwargs: object) -> object:
+        result = original_stage(*args, **kwargs)
+        try:
+            (root / "new").symlink_to(outside, target_is_directory=True)
+        except OSError:
+            pytest.skip("symlink creation unavailable")
+        return result
+    monkeypatch.setattr(engine, "_stage_writes", stage_then_swap)
+    with pytest.raises(UnsafePathError):
+        apply_plan(plan)
+    assert not (outside / "file.txt").exists()
+
+
+def test_replaced_lock_is_never_unlinked_on_exit(tmp_path: Path) -> None:
+    path = tmp_path / ".workflow.lock"
+    lock = ScopeLock(path)
+    lock.__enter__()
+    path.unlink()
+    path.write_text("replacement", encoding="utf-8")
+    lock.__exit__(None, None, None)
+    assert path.read_text(encoding="utf-8") == "replacement"
+
+
+@pytest.mark.parametrize("storage_name", ("backups", "journals"))
+def test_rollback_rejects_symlinked_retained_storage_before_use(tmp_path: Path, storage_name: str) -> None:
+    root, outside = tmp_path / ".agents", tmp_path / "outside"
+    root.mkdir(); outside.mkdir()
+    rules = root / "RULES.md"; rules.write_bytes(b"old")
+    journal = apply_plan(make_plan(root, sha256_file(rules)))
+    storage = root / "workflow" / storage_name
+    shutil.rmtree(storage)
+    try:
+        storage.symlink_to(outside, target_is_directory=True)
+    except OSError:
+        pytest.skip("symlink creation unavailable")
+
+    with pytest.raises(UnsafePathError, match="symlink"):
+        rollback_transaction(Path(journal.journal_path))
+    assert not list(outside.iterdir())

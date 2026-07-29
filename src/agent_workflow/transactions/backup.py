@@ -122,7 +122,7 @@ def read_verified_payload(backup_root: Path, entry: BackupInventoryEntry) -> byt
 def _read_inventory(path: Path) -> tuple[BackupInventoryEntry, ...]:
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as error:
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
         raise BackupError("invalid backup inventory") from error
     if not isinstance(payload, dict) or set(payload) != _INVENTORY_KEYS or payload.get("schema_version") != 1:
         raise BackupError("invalid backup inventory")

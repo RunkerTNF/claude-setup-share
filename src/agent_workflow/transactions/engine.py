@@ -53,6 +53,7 @@ def apply_plan(plan: TransactionPlan) -> TransactionJournal:
         backup.verify_backup(backup_root, sources)
         stage_root = _create_stage_root(staging_parent, transaction_id, "apply")
         staged = _stage_writes(stage_root, resolved_operations)
+        _revalidate_complete_plan(plan, resolved_operations)
         entries = tuple(
             JournalEntry(
                 root_id=item.operation.root_id,
@@ -85,6 +86,7 @@ def apply_plan(plan: TransactionPlan) -> TransactionJournal:
             journal = journal.with_status("committing")
             _write_journal(journal)
             for item in resolved_operations:
+                _revalidate_plan_item(plan, item)
                 if isinstance(item.operation, WriteOperation):
                     item.target.parent.mkdir(parents=True, exist_ok=True)
                     _verify_current_target(item.target, item.before_sha256, context="source changed during apply")
@@ -95,30 +97,39 @@ def apply_plan(plan: TransactionPlan) -> TransactionJournal:
             journal = journal.with_status("committed")
             _write_journal(journal)
             return journal
-        except Exception:
+        except Exception as original_error:
             if committing_started:
-                _restore_from_backup(scope_root, staging_parent, transaction_id, resolved_operations, backup_root, sources)
-                _write_journal(journal.with_status("rolled_back"))
-            raise
+                rolling_back = journal.with_status("rolling_back")
+                _write_journal(rolling_back)
+                try:
+                    _restore_from_backup(scope_root, staging_parent, transaction_id, resolved_operations, backup_root, sources)
+                except Exception as cleanup_error:
+                    _write_journal(rolling_back.with_status("rollback_failed"))
+                    original_error.add_note(f"rollback cleanup failed: {cleanup_error}")
+                else:
+                    _write_journal(rolling_back.with_status("rolled_back"))
+            raise original_error
 
 
 def rollback_transaction(journal_path: Path) -> TransactionJournal:
-    supplied_path = Path(journal_path)
-    if supplied_path.is_symlink():
-        raise UnsafePathError(f"journal path is a symlink: {supplied_path}")
+    supplied_path = _lexical_path(Path(journal_path))
+    if len(supplied_path.parents) < 3:
+        raise ValueError("journal path is not a transaction journal location")
+    _assert_no_symlink_components(supplied_path.parents[2], ("workflow", "journals", supplied_path.name))
     journal = TransactionJournal.from_json(supplied_path.read_text(encoding="utf-8"))
-    actual_path = supplied_path.resolve(strict=False)
-    if actual_path != Path(journal.journal_path).resolve(strict=False):
+    if supplied_path != _lexical_path(Path(journal.journal_path)):
         raise ValueError("journal path does not match the transaction location")
-    if journal.status != "committed":
+    if journal.status not in {"committed", "rolling_back", "rollback_failed"}:
         raise ConflictError(f"transaction is not committed: {journal.status}")
     scope_root = Path(journal.scope_root)
     _ensure_scope_root(scope_root)
     with ScopeLock(scope_root / ".workflow.lock"):
+        _assert_no_symlink_components(scope_root, ("workflow", "journals", Path(journal.journal_path).name))
+        _assert_no_symlink_components(scope_root, ("workflow", "backups", journal.transaction_id, "inventory.json"))
         workflow_root = _ensure_internal_directory(scope_root / "workflow")
         staging_parent = _ensure_internal_directory(workflow_root / "staging")
         expected_backup_root = workflow_root / "backups" / journal.transaction_id
-        if Path(journal.backup_root).resolve(strict=False) != expected_backup_root.resolve(strict=False):
+        if _lexical_path(Path(journal.backup_root)) != _lexical_path(expected_backup_root):
             raise ValueError("backup_root does not match the transaction location")
         resolved = _resolve_journal_entries(journal)
         _reject_internal_collisions(scope_root, resolved)
@@ -128,9 +139,20 @@ def rollback_transaction(journal_path: Path) -> TransactionJournal:
         )
         backup.verify_backup(expected_backup_root, sources)
         for entry, target in resolved:
-            _verify_current_target(target, entry.after_sha256, context="rollback refused due to drift")
-        _restore_from_backup_entries(scope_root, staging_parent, journal.transaction_id, resolved, expected_backup_root, sources)
-        rolled_back = journal.with_status("rolled_back")
+            current = _safe_sha256(target)
+            allowed_states = {entry.after_sha256}
+            if journal.status in {"rolling_back", "rollback_failed"}:
+                allowed_states.add(entry.before_sha256)
+            if current not in allowed_states:
+                raise SourceChangedError(f"rollback refused due to drift: {target}")
+        rolling_back = journal.with_status("rolling_back")
+        _write_journal(rolling_back)
+        try:
+            _restore_from_backup_entries(scope_root, staging_parent, journal.transaction_id, resolved, expected_backup_root, sources)
+        except Exception:
+            _write_journal(rolling_back.with_status("rollback_failed"))
+            raise
+        rolled_back = rolling_back.with_status("rolled_back")
         _write_journal(rolled_back)
         return rolled_back
 
@@ -171,6 +193,22 @@ def _reject_target_symlinks(root: Path, relative_path: str) -> None:
             break
 
 
+def _lexical_path(path: Path) -> Path:
+    if not path.is_absolute():
+        raise ValueError("transaction paths must be absolute")
+    return Path(os.path.normpath(os.path.abspath(path)))
+
+
+def _assert_no_symlink_components(anchor: Path, components: tuple[str, ...]) -> None:
+    if anchor.is_symlink():
+        raise UnsafePathError(f"transaction storage anchor is a symlink: {anchor}")
+    current = anchor
+    for component in components:
+        current /= component
+        if current.is_symlink():
+            raise UnsafePathError(f"transaction storage contains a symlink: {current}")
+
+
 def _verify_pre_state(operations: Iterable[_ResolvedOperation]) -> None:
     for item in operations:
         expected = item.operation.expected_sha256
@@ -198,11 +236,35 @@ def _reject_internal_collisions(scope_root: Path, operations: Iterable[object]) 
     for item in operations:
         target = item.target if isinstance(item, _ResolvedOperation) else item[1]
         for internal in protected:
-            try:
-                target.relative_to(internal)
-            except ValueError:
-                continue
-            raise UnsafePathError(f"plan operation collides with transaction storage: {target}")
+            if _overlaps(target, internal):
+                raise UnsafePathError(f"plan operation collides with transaction storage: {target}")
+
+
+def _overlaps(first: Path, second: Path) -> bool:
+    try:
+        first.relative_to(second)
+        return True
+    except ValueError:
+        try:
+            second.relative_to(first)
+            return True
+        except ValueError:
+            return False
+
+
+def _revalidate_complete_plan(plan: TransactionPlan, operations: Iterable[_ResolvedOperation]) -> None:
+    for item in operations:
+        _revalidate_plan_item(plan, item)
+        _verify_current_target(item.target, item.before_sha256, context="source changed during apply")
+
+
+def _revalidate_plan_item(plan: TransactionPlan, item: _ResolvedOperation) -> None:
+    roots = {root_id: Path(path) for root_id, path in plan.target_roots.items()}
+    allowed = tuple(Path(path) for path in plan.allowed_roots)
+    target = resolve_write_target(item.operation.root_id, item.operation.path, roots, allowed)
+    _reject_target_symlinks(roots[item.operation.root_id], item.operation.path)
+    if target != item.target:
+        raise UnsafePathError(f"transaction target changed after approval: {item.target}")
 
 
 def _ensure_scope_root(scope_root: Path) -> None:
@@ -287,16 +349,22 @@ def _restore_from_backup_entries(
         destination.parent.mkdir(parents=True, exist_ok=True)
         _write_fsynced(destination, payload)
         staged[(entry.root_id, entry.path)] = destination
+    failures: list[Exception] = []
     for entry, target in resolved:
-        if entry.existed:
-            target.parent.mkdir(parents=True, exist_ok=True)
-            os.replace(staged[(entry.root_id, entry.path)], target)
-        else:
-            if target.exists() or target.is_symlink():
-                if target.is_dir():
-                    raise BackupError(f"cannot remove unexpected directory during rollback: {target}")
-                target.unlink()
+        try:
+            if entry.existed:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                os.replace(staged[(entry.root_id, entry.path)], target)
+            else:
+                if target.exists() or target.is_symlink():
+                    if target.is_dir():
+                        raise BackupError(f"cannot remove unexpected directory during rollback: {target}")
+                    target.unlink()
                 _cleanup_empty_parents(target.parent, _target_root_for_entry(entry, resolved))
+        except Exception as error:
+            failures.append(error)
+    if failures:
+        raise BackupError("rollback restoration incomplete: " + "; ".join(str(error) for error in failures))
 
 
 def _target_root_for_entry(entry: JournalEntry, resolved: tuple[tuple[JournalEntry, Path], ...]) -> Path:

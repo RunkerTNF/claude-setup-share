@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 import json
+import os
 from pathlib import Path
 from types import MappingProxyType
 from typing import Mapping
@@ -27,7 +28,7 @@ _JOURNAL_KEYS = frozenset(
     }
 )
 _ENTRY_KEYS = frozenset({"root_id", "path", "operation_kind", "existed", "before_sha256", "after_sha256"})
-_STATUSES = frozenset({"prepared", "committing", "committed", "rolled_back"})
+_STATUSES = frozenset({"prepared", "committing", "committed", "rolling_back", "rollback_failed", "rolled_back"})
 
 
 def _absolute_path(value: str, field: str) -> Path:
@@ -36,7 +37,7 @@ def _absolute_path(value: str, field: str) -> Path:
     path = Path(value)
     if not path.is_absolute():
         raise ValueError(f"{field} must be an absolute path")
-    return path.resolve(strict=False)
+    return Path(os.path.normpath(os.path.abspath(path)))
 
 
 @dataclass(frozen=True)
@@ -137,9 +138,9 @@ class TransactionJournal:
         expected_journal = scope_root / "workflow" / "journals" / f"{self.transaction_id}.json"
         backup_root = _absolute_path(self.backup_root, "backup_root")
         journal_path = _absolute_path(self.journal_path, "journal_path")
-        if backup_root != expected_backup.resolve(strict=False):
+        if backup_root != _absolute_path(str(expected_backup), "backup_root"):
             raise ValueError("backup_root is not the transaction backup location")
-        if journal_path != expected_journal.resolve(strict=False):
+        if journal_path != _absolute_path(str(expected_journal), "journal_path"):
             raise ValueError("journal_path is not the transaction journal location")
         if not all(isinstance(item, str) for item in self.warnings):
             raise ValueError("warnings must contain strings")
