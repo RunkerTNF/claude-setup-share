@@ -1,8 +1,9 @@
 {
   "bootstrap_root": null,
+  "excluded_skills": [],
   "generated_files": {
-    "neutral:RULES.md": "9eae0a8c98ba46564b3d4502c5a3664b18cede4f89f36ef9c69861bb27ecdc3d",
-    "neutral:memory/MEMORY.md": "026f95f4544092d38834af2c71b5e3cd8fcd1095b83e258d67c06b46147324fb",
+    "neutral:RULES.md": "3b138a7bdfb9ad9d0a0108de652ad2f4ddc1614d6032bb45b40ec33454f6e1bb",
+    "neutral:memory/MEMORY.md": "358215c449c2995a7c6295ecbbca2c3e709167bbff4c0e2d02f03186ccfe538e",
     "neutral:skills/agent-workflow-migrate/SKILL.md": "cf4c682fae801f1b9a2b0a9897d57350d1ea789df66f32a6055aef0028ed0553",
     "neutral:skills/agent-workflow-migrate/references/classification-contract.md": "9ed613e73d18e27c5a1c6d79bd3478233585dec2ccd9955bad2f5deb16d99f80",
     "neutral:skills/agent-workflow-migrate/references/recovery.md": "502cc51cbde02729b18f27e1195b4d7fad16ec6ff35b63ba9942864d283cec0b",
@@ -29,8 +30,8 @@
     "neutral:skills/tasks/SKILL.md": "959f07de9f4a1d6926930dcfddbf52eeb5caa142b090abcf16df836c8e4eace4",
     "neutral:skills/tasks/references/workitems-rendering.md": "c991c41f18ad038721ebf22c4f031ed74a61468d7681c68d953d15083d86a0f1",
     "neutral:skills/wrap/SKILL.md": "9a9998dd1be7bee3244054e786af5f5d6f06d38015bbad8e0aaf037cfa85b9e7",
-    "neutral:workflow/agent-workflow.pyz": "71a8479084ae9b69e2a0b12fdfe0925576c12689ccd81b5e61250a78f9cf7c46",
-    "scope:.claude/CLAUDE.md": "58b3e7aa95df9037f8a825c0094b5c3e935854f137d7b1160951aa938df128cb",
+    "neutral:workflow/agent-workflow.pyz": "573ff0f7a5220ac7fc9ce74c3c19201b4c9670d52fe057300820ce99b823046c",
+    "scope:.claude/CLAUDE.md": "da8eb53e1dab625f88553f4920d73b6a045af0cc9895a628230f0c7c2317147e",
     "scope:.claude/skills/agent-workflow-migrate/SKILL.md": "2d7d415d7856492c3406bd10e15814a1a3a9724959fb4660eb6018d44363c376",
     "scope:.claude/skills/agent-workflow-setup/SKILL.md": "0ad60542d6013e48720e0ac12ffb621233cd2c9630a9c2ce73dd7baae99ba05e",
     "scope:.claude/skills/backlog/SKILL.md": "5a4706bb2e65e4fa142140f39e02380094b72a8e7370492ff1b0e37017df537d",

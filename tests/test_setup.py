@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 
@@ -11,12 +13,28 @@ from agent_workflow.adapters.base import AdapterContext
 from agent_workflow.adapters.registry import builtin_registry
 from agent_workflow.doctor import run_doctor
 from agent_workflow.model import ProjectProfile, Scope
+from agent_workflow.plan import DeleteOperation
 from agent_workflow.setup import (
     SetupRequest,
     build_setup_plan,
     detect_setup_targets,
 )
 from agent_workflow.transactions import apply_plan
+
+
+SHIPPED_SKILLS = {
+    "agent-workflow-migrate",
+    "agent-workflow-setup",
+    "backlog",
+    "code-review",
+    "feedback",
+    "morning",
+    "my-reviews",
+    "pick",
+    "plan-review",
+    "tasks",
+    "wrap",
+}
 
 
 def _global_request(
@@ -73,6 +91,179 @@ def test_global_setup_composes_core_manager_skill_and_targets(
     assert manifest["bootstrap_root"] is None
     assert "scope:.claude/CLAUDE.md" in manifest["generated_files"]
     assert "scope:.codex/AGENTS.md" in manifest["generated_files"]
+    assert manifest["excluded_skills"] == []
+
+
+def test_global_setup_installs_exact_shipped_skill_inventory(
+    tmp_path: Path,
+) -> None:
+    plan = build_setup_plan(_global_request(tmp_path, targets=("claude",)))
+
+    canonical = {
+        operation.path.split("/")[1]
+        for operation in plan.operations
+        if operation.root_id == "neutral"
+        and operation.path.startswith("skills/")
+        and operation.path.endswith("/SKILL.md")
+    }
+    wrappers = {
+        operation.path.split("/")[2]
+        for operation in plan.operations
+        if operation.root_id == "scope"
+        and operation.path.startswith(".claude/skills/")
+        and operation.path.endswith("/SKILL.md")
+    }
+
+    assert canonical == SHIPPED_SKILLS
+    assert wrappers == SHIPPED_SKILLS
+
+
+def test_global_setup_records_explicit_optional_skill_exclusion(
+    tmp_path: Path,
+) -> None:
+    request = _global_request(tmp_path, targets=("claude",))
+    request = replace(request, excluded_skills=("morning",))
+
+    plan = build_setup_plan(request)
+
+    assert not any(
+        "/morning/" in f"/{operation.path}/"
+        for operation in plan.operations
+    )
+    assert "excluded skill: morning" in plan.warnings
+    manifest_operation = next(
+        operation
+        for operation in plan.operations
+        if operation.root_id == "neutral"
+        and operation.path == "manifest.json"
+    )
+    assert json.loads(
+        manifest_operation.content_bytes()
+    )["excluded_skills"] == ["morning"]
+
+
+def test_global_reconfigure_removes_managed_excluded_skill(
+    tmp_path: Path,
+) -> None:
+    request = _global_request(tmp_path, targets=("claude",))
+    apply_plan(build_setup_plan(request))
+    excluded = replace(request, excluded_skills=("morning",))
+
+    plan = build_setup_plan(excluded)
+
+    deleted = {
+        (operation.root_id, operation.path)
+        for operation in plan.operations
+        if isinstance(operation, DeleteOperation)
+    }
+    assert deleted >= {
+        ("neutral", "skills/morning/SKILL.md"),
+        ("scope", ".claude/skills/morning/SKILL.md"),
+    }
+    apply_plan(plan)
+    assert not (
+        request.home
+        / ".agents"
+        / "skills"
+        / "morning"
+        / "SKILL.md"
+    ).exists()
+    assert not (
+        request.home
+        / ".claude"
+        / "skills"
+        / "morning"
+        / "SKILL.md"
+    ).exists()
+    assert run_doctor(request.home / ".agents") == ()
+
+
+def test_skill_exclusion_does_not_delete_adapter_asset_named_skills(
+    tmp_path: Path,
+) -> None:
+    adapter_source = tmp_path / "adapter-source"
+    package = adapter_source / "fixture-agent"
+    shutil.copytree(
+        Path("tests/fixtures/adapters/declarative/fixture-agent"),
+        package,
+    )
+    asset = package / "skills" / "morning" / "config.json"
+    asset.parent.mkdir(parents=True)
+    asset.write_text('{"enabled": true}\n', encoding="utf-8")
+    request = _global_request(
+        tmp_path,
+        targets=("fixture-agent",),
+        adapter_sources=(adapter_source,),
+    )
+    apply_plan(build_setup_plan(request))
+
+    plan = build_setup_plan(
+        replace(request, excluded_skills=("morning",))
+    )
+
+    adapter_path = (
+        "workflow/adapters/fixture-agent/"
+        "skills/morning/config.json"
+    )
+    assert any(
+        operation.path == adapter_path
+        and not isinstance(operation, DeleteOperation)
+        for operation in plan.operations
+    )
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["agent-workflow-setup", "agent-workflow-migrate"],
+)
+def test_global_setup_cannot_exclude_management_skill(
+    tmp_path: Path,
+    name: str,
+) -> None:
+    request = _global_request(tmp_path)
+    request = replace(request, excluded_skills=(name,))
+
+    with pytest.raises(ValueError, match="management skill"):
+        build_setup_plan(request)
+
+
+def test_claude_statusline_requires_explicit_opt_in(
+    tmp_path: Path,
+) -> None:
+    default = _global_request(tmp_path, targets=("claude",))
+    default_plan = build_setup_plan(default)
+    opted_in = replace(default, include_claude_statusline=True)
+    opted_in_plan = build_setup_plan(opted_in)
+
+    assert not any(
+        operation.path == ".claude/statusline.js"
+        for operation in default_plan.operations
+    )
+    assert any(
+        operation.root_id == "scope"
+        and operation.path == ".claude/statusline.js"
+        for operation in opted_in_plan.operations
+    )
+
+
+def test_claude_statusline_opt_out_removes_managed_asset(
+    tmp_path: Path,
+) -> None:
+    default = _global_request(tmp_path, targets=("claude",))
+    opted_in = replace(default, include_claude_statusline=True)
+    apply_plan(build_setup_plan(opted_in))
+
+    plan = build_setup_plan(default)
+
+    assert any(
+        isinstance(operation, DeleteOperation)
+        and operation.root_id == "scope"
+        and operation.path == ".claude/statusline.js"
+        for operation in plan.operations
+    )
+    apply_plan(plan)
+    assert not (default.home / ".claude" / "statusline.js").exists()
+    assert run_doctor(default.home / ".agents") == ()
 
 
 def test_global_setup_installs_manager_skill_without_agent_target(
@@ -182,6 +373,11 @@ def test_applied_global_setup_unlocks_project_setup(tmp_path: Path) -> None:
         ("scope", ".syncprotect"),
         ("scope", "AGENTS.override.md"),
     }
+    assert not any(
+        "/skills/" in f"/{operation.path}"
+        or operation.path.startswith("skills/")
+        for operation in plan.operations
+    )
     apply_plan(plan)
     assert run_doctor(project / ".agents") == ()
 

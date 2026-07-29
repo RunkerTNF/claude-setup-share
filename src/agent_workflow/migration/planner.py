@@ -1131,6 +1131,7 @@ def _native_entrypoint_replacements(
             sorted(set((*manifest.targets, *options.targets)))
         ),
         generated_files=generated_files,
+        excluded_skills=manifest.excluded_skills,
         bootstrap_root=manifest.bootstrap_root,
     )
     operations.append(

@@ -1,10 +1,11 @@
 {
   "bootstrap_root": null,
+  "excluded_skills": [],
   "generated_files": {
-    "neutral:RULES.md": "cefb114654a0d6944ab6e63c48142d7bb176a5dfa8fa104bdaaf8ef27709277b",
-    "neutral:memory/MEMORY.md": "8dd60f9c1cb534b777f4029169267a921ab8fbf230b0c52157d5cc504f4e596a",
+    "neutral:RULES.md": "9b140614361ade760014eb87029195c4a2e426109efc07112cecf668f155d590",
+    "neutral:memory/MEMORY.md": "a335e8c5410f5e31d4764f3a634cf365b403b8849a71e441df1116bada8cda6f",
     "neutral:sessions/.gitkeep": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    "scope:AGENTS.override.md": "2c3c61708740fc5249aa22606311093e75d2931ca08d79d9a59d38803e90db1d"
+    "scope:AGENTS.override.md": "501847e2f85632622dd8111f5b1e0d41697f997487098741cc3763f17b310f80"
   },
   "generator_version": "0.1.0",
   "profile": "local",

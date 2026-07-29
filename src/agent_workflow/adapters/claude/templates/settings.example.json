@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)"
+    ]
+  },
+  "statusLine": {
+    "type": "command",
+    "command": "node <absolute-path-to-statusline.js>"
+  },
+  "autoMemoryDirectory": "~/.agents/memory"
+}

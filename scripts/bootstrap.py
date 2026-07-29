@@ -44,6 +44,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--adapter-dir", action="append", default=[])
     parser.add_argument("--trust-adapter-code", action="append", default=[])
     parser.add_argument("--manage-syncprotect", action="store_true")
+    parser.add_argument("--exclude-skill", action="append", default=[])
+    parser.add_argument(
+        "--include-claude-statusline",
+        action="store_true",
+    )
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--yes", action="store_true")
     return parser
@@ -111,6 +116,10 @@ def main(argv: list[str] | None = None) -> int:
         ]
         if args.manage_syncprotect:
             preview_arguments.append("--manage-syncprotect")
+        for skill_name in args.exclude_skill:
+            preview_arguments.extend(("--exclude-skill", skill_name))
+        if args.include_claude_statusline:
+            preview_arguments.append("--include-claude-statusline")
         previewed = manager_main(preview_arguments)
         if previewed != 0:
             print(

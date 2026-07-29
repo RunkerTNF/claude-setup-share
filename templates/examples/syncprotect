@@ -1,0 +1,8 @@
+# Optional local-only paths for a two-machine workflow.
+# Adapt this list to the selected project profile and sync tool.
+.agents/
+.claude/
+.codex/
+CLAUDE.local.md
+AGENTS.override.md
+.sync-state/

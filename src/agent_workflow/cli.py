@@ -65,6 +65,11 @@ def build_parser() -> argparse.ArgumentParser:
     _add_setup_scope_arguments(setup_preview)
     setup_preview.add_argument("--source-root")
     setup_preview.add_argument("--manage-syncprotect", action="store_true")
+    setup_preview.add_argument("--exclude-skill", action="append", default=[])
+    setup_preview.add_argument(
+        "--include-claude-statusline",
+        action="store_true",
+    )
     setup_preview.add_argument("--output", required=True)
     _add_host_arguments(setup_preview)
     _add_adapter_arguments(setup_preview)
@@ -95,6 +100,11 @@ def build_parser() -> argparse.ArgumentParser:
     setup.add_argument("--target", action="append", default=[])
     setup.add_argument("--source-root")
     setup.add_argument("--manage-syncprotect", action="store_true")
+    setup.add_argument("--exclude-skill", action="append", default=[])
+    setup.add_argument(
+        "--include-claude-statusline",
+        action="store_true",
+    )
     setup.add_argument("--output", required=True)
     _add_host_arguments(setup)
     _add_adapter_arguments(setup)
@@ -474,6 +484,8 @@ def _handle_setup_preview(args: argparse.Namespace) -> int:
             Path(path) for path in args.adapter_dir
         ),
         trusted_adapter_ids=tuple(args.trust_adapter_code),
+        excluded_skills=tuple(args.exclude_skill),
+        include_claude_statusline=args.include_claude_statusline,
     )
     plan = build_setup_plan(request)
     output = Path(args.output)
@@ -562,6 +574,8 @@ def _handle_plan_setup(args: argparse.Namespace) -> int:
             Path(path) for path in args.adapter_dir
         ),
         trusted_adapter_ids=tuple(args.trust_adapter_code),
+        excluded_skills=tuple(args.exclude_skill),
+        include_claude_statusline=args.include_claude_statusline,
     )
     plan = build_setup_plan(request)
     output = Path(args.output)
