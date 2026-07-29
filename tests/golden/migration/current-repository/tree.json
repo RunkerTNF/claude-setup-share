@@ -1,0 +1,62 @@
+{
+  "RULES.md": {
+    "sha256": "c1ff501e106257d956fc72172d90bd75e7b830d3655cba1651f91cabd3a33149",
+    "size_bytes": 121,
+    "text": "# Agent Workflow Rules\n\nThis file is the neutral, global source of truth for workflow rules shared by configured agents.\n"
+  },
+  "manifest.json": {
+    "sha256": "5e6017174a1aef60614dd482445c23bb9d3050db3c7cf0a960e1de3f2d8f5487",
+    "size_bytes": 374,
+    "text": "{\n  \"bootstrap_root\": \"<bootstrap-root>\",\n  \"generated_files\": {\n    \"neutral:RULES.md\": \"c1ff501e106257d956fc72172d90bd75e7b830d3655cba1651f91cabd3a33149\",\n    \"neutral:memory/MEMORY.md\": \"8c4f1fbee8471f84ef41df05b2926582df598ea8e8dc1d5b30a3e4c67a5a3a5a\"\n  },\n  \"generator_version\": \"0.1.0\",\n  \"profile\": null,\n  \"schema_version\": 1,\n  \"scope\": \"global\",\n  \"targets\": []\n}\n"
+  },
+  "memory/MEMORY.md": {
+    "sha256": "8c4f1fbee8471f84ef41df05b2926582df598ea8e8dc1d5b30a3e4c67a5a3a5a",
+    "size_bytes": 138,
+    "text": "# Global Memory Index\n\nAdd durable global notes under the typed `feedback/`, `user/`, and `reference/` directories, then index them here.\n"
+  },
+  "rules/claude-shared-rules-from-claude.md": {
+    "sha256": "3e15ab52f5c30071baf62a2a1d1b88bf9122c8e5836f85bc2814e15ca894ace5",
+    "size_bytes": 128,
+    "text": "# Shared working rules\n\nPreserve unrelated edits, verify changes, and keep reusable knowledge in\nportable workflow directories.\n"
+  },
+  "skills/backlog/SKILL.md": {
+    "sha256": "48a2b10d25a7f9da55454dd230785076d35524323ff6022c0bbbe2ca26e944bb",
+    "size_bytes": 168,
+    "text": "---\nname: backlog\ndescription: Refresh a portable backlog from durable project notes.\n---\n\nCollect deferred work, merge duplicate entries, and keep stable identifiers.\n"
+  },
+  "skills/feedback/SKILL.md": {
+    "sha256": "58c72d2cdbbdc58ff01369a9b4cbdfeb80b2da35c6be705608787072b5016500",
+    "size_bytes": 178,
+    "text": "---\nname: feedback\ndescription: Summarize review feedback that requires a response.\n---\n\nGroup feedback by change, distinguish questions from blockers, and suggest next actions.\n"
+  },
+  "skills/init-claude/SKILL.md": {
+    "sha256": "396e6dfe5e19563903a77ba615fdd2758008e69be2ea8653c9925fd34d2b633e",
+    "size_bytes": 166,
+    "text": "---\nname: init-claude\ndescription: Set up the portable agent workflow for a selected project.\n---\n\nCreate the neutral workflow layout and selected agent entrypoints.\n"
+  },
+  "skills/morning/SKILL.md": {
+    "sha256": "aa64c1cae2e530f76f4b8284504790d2eb5921b2dbded643159012485b4c0082",
+    "size_bytes": 170,
+    "text": "---\nname: morning\ndescription: Produce a concise morning brief from available work items.\n---\n\nSummarize urgent changes, reviews, feedback, and recommended next actions.\n"
+  },
+  "skills/my-reviews/SKILL.md": {
+    "sha256": "51396415294a48eb1874071a0b10cf1a30f4b2e15dd51a143a3f92cf7aa73d2d",
+    "size_bytes": 151,
+    "text": "---\nname: my-reviews\ndescription: Summarize changes awaiting the user's review.\n---\n\nList review requests by urgency with the latest relevant context.\n"
+  },
+  "skills/pick/SKILL.md": {
+    "sha256": "c554ef2d8d379ab8353494300094189e359d2d6a46e3239f16931feea642dc3c",
+    "size_bytes": 173,
+    "text": "---\nname: pick\ndescription: Select a backlog item and prepare its implementation context.\n---\n\nResolve the requested item, gather relevant context, and draft the next plan.\n"
+  },
+  "skills/tasks/SKILL.md": {
+    "sha256": "172b5ee04f370237ba129f67e3145bbde1260c41689158b11d0b7f0f1e7a5ad2",
+    "size_bytes": 166,
+    "text": "---\nname: tasks\ndescription: Summarize task changes from available work-item data.\n---\n\nRender task updates with stable identifiers, state changes, and next actions.\n"
+  },
+  "skills/wrap/SKILL.md": {
+    "sha256": "bf839bd67cf77595b81d603fba8652e3f24f3c5760d569e73965827a7d198ced",
+    "size_bytes": 154,
+    "text": "---\nname: wrap\ndescription: Write an end-of-session note with durable context.\n---\n\nRecord the summary, changes, decisions, challenges, and open threads.\n"
+  }
+}

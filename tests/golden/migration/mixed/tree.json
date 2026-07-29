@@ -1,0 +1,32 @@
+{
+  "RULES.md": {
+    "sha256": "c1ff501e106257d956fc72172d90bd75e7b830d3655cba1651f91cabd3a33149",
+    "size_bytes": 121,
+    "text": "# Agent Workflow Rules\n\nThis file is the neutral, global source of truth for workflow rules shared by configured agents.\n"
+  },
+  "manifest.json": {
+    "sha256": "5e6017174a1aef60614dd482445c23bb9d3050db3c7cf0a960e1de3f2d8f5487",
+    "size_bytes": 374,
+    "text": "{\n  \"bootstrap_root\": \"<bootstrap-root>\",\n  \"generated_files\": {\n    \"neutral:RULES.md\": \"c1ff501e106257d956fc72172d90bd75e7b830d3655cba1651f91cabd3a33149\",\n    \"neutral:memory/MEMORY.md\": \"8c4f1fbee8471f84ef41df05b2926582df598ea8e8dc1d5b30a3e4c67a5a3a5a\"\n  },\n  \"generator_version\": \"0.1.0\",\n  \"profile\": null,\n  \"schema_version\": 1,\n  \"scope\": \"global\",\n  \"targets\": []\n}\n"
+  },
+  "memory/MEMORY.md": {
+    "sha256": "8c4f1fbee8471f84ef41df05b2926582df598ea8e8dc1d5b30a3e4c67a5a3a5a",
+    "size_bytes": 138,
+    "text": "# Global Memory Index\n\nAdd durable global notes under the typed `feedback/`, `user/`, and `reference/` directories, then index them here.\n"
+  },
+  "memory/preferences-from-codex.md": {
+    "sha256": "f21f05a27c0fd5fd84da87181e43674a357ecf6e25c09d230a7688d4af545f67",
+    "size_bytes": 271,
+    "text": "---\ntype: imported-memory\nsource-agent: codex\nsource-scope: global\nsource-relative-path: .codex/memory/preferences.md\nsource-sha256: 60a46dc827def3b5ddaf300b2b82463096310d6f8d60c2fae12da93d26c8f410\n---\n\n# Preferences\n\nUse neutral workflow directories for portable state.\n"
+  },
+  "rules/claude-shared-rules-from-claude.md": {
+    "sha256": "df97a6422dc276675b4b774c59b8101d39799d0578c513a2554328a0a39e2a10",
+    "size_bytes": 61,
+    "text": "# Shared rules\n\nKeep generated workflow state deterministic.\n"
+  },
+  "skills/pick/SKILL.md": {
+    "sha256": "86f0d2c6ee5c69dd05e85bedfb7e935da7dce1bc5ce207ef056b9894e455284c",
+    "size_bytes": 175,
+    "text": "---\nname: pick\ndescription: Select a backlog item and prepare its implementation context.\n---\n\nSelect the requested backlog item, gather its context, and draft the next plan.\n"
+  }
+}

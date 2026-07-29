@@ -1,0 +1,37 @@
+{
+  "RULES.md": {
+    "sha256": "c1ff501e106257d956fc72172d90bd75e7b830d3655cba1651f91cabd3a33149",
+    "size_bytes": 121,
+    "text": "# Agent Workflow Rules\n\nThis file is the neutral, global source of truth for workflow rules shared by configured agents.\n"
+  },
+  "manifest.json": {
+    "sha256": "5e6017174a1aef60614dd482445c23bb9d3050db3c7cf0a960e1de3f2d8f5487",
+    "size_bytes": 374,
+    "text": "{\n  \"bootstrap_root\": \"<bootstrap-root>\",\n  \"generated_files\": {\n    \"neutral:RULES.md\": \"c1ff501e106257d956fc72172d90bd75e7b830d3655cba1651f91cabd3a33149\",\n    \"neutral:memory/MEMORY.md\": \"8c4f1fbee8471f84ef41df05b2926582df598ea8e8dc1d5b30a3e4c67a5a3a5a\"\n  },\n  \"generator_version\": \"0.1.0\",\n  \"profile\": null,\n  \"schema_version\": 1,\n  \"scope\": \"global\",\n  \"targets\": []\n}\n"
+  },
+  "memory/MEMORY.md": {
+    "sha256": "8c4f1fbee8471f84ef41df05b2926582df598ea8e8dc1d5b30a3e4c67a5a3a5a",
+    "size_bytes": 138,
+    "text": "# Global Memory Index\n\nAdd durable global notes under the typed `feedback/`, `user/`, and `reference/` directories, then index them here.\n"
+  },
+  "memory/preferences-from-claude.md": {
+    "sha256": "8a1a7920bd7f616281425a0851003fc390e0221d2691e6e560110168b91919bb",
+    "size_bytes": 277,
+    "text": "---\ntype: imported-memory\nsource-agent: claude\nsource-scope: global\nsource-relative-path: .claude/memory/preferences.md\nsource-sha256: 0ed7630bb02af7c8b7ce2975f90b1735c8c9b500f140c7a224d6c2aabf8a951b\n---\n\n# Preferences\n\nKeep implementation handoffs concise and evidence based.\n"
+  },
+  "rules/claude-shared-rules-from-claude.md": {
+    "sha256": "6764e0bca448fd9442054f9b9472e079c540473ac55755f4fcb2c9468e8161a8",
+    "size_bytes": 82,
+    "text": "# Shared rules\n\nPrefer small, verified changes and preserve unrelated user edits.\n"
+  },
+  "sessions/2026-07-29-example-from-claude.md": {
+    "sha256": "c8e6badc77902b01c7f8d50a2dbe9e8f89d0e71440a447cf302f23301debf898",
+    "size_bytes": 62,
+    "text": "# Example session\n\nThe portable workflow design was approved.\n"
+  },
+  "skills/wrap/SKILL.md": {
+    "sha256": "04c14f2f6d859b03d60f9e9b01ec87de8dc57e3e659d379128ed74ca1b6047e3",
+    "size_bytes": 139,
+    "text": "---\nname: wrap\ndescription: Write a portable end-of-session note.\n---\n\nWrite a session note with the summary, decisions, and open threads.\n"
+  }
+}

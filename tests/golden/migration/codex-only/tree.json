@@ -1,0 +1,37 @@
+{
+  "RULES.md": {
+    "sha256": "c1ff501e106257d956fc72172d90bd75e7b830d3655cba1651f91cabd3a33149",
+    "size_bytes": 121,
+    "text": "# Agent Workflow Rules\n\nThis file is the neutral, global source of truth for workflow rules shared by configured agents.\n"
+  },
+  "manifest.json": {
+    "sha256": "5e6017174a1aef60614dd482445c23bb9d3050db3c7cf0a960e1de3f2d8f5487",
+    "size_bytes": 374,
+    "text": "{\n  \"bootstrap_root\": \"<bootstrap-root>\",\n  \"generated_files\": {\n    \"neutral:RULES.md\": \"c1ff501e106257d956fc72172d90bd75e7b830d3655cba1651f91cabd3a33149\",\n    \"neutral:memory/MEMORY.md\": \"8c4f1fbee8471f84ef41df05b2926582df598ea8e8dc1d5b30a3e4c67a5a3a5a\"\n  },\n  \"generator_version\": \"0.1.0\",\n  \"profile\": null,\n  \"schema_version\": 1,\n  \"scope\": \"global\",\n  \"targets\": []\n}\n"
+  },
+  "memory/MEMORY.md": {
+    "sha256": "8c4f1fbee8471f84ef41df05b2926582df598ea8e8dc1d5b30a3e4c67a5a3a5a",
+    "size_bytes": 138,
+    "text": "# Global Memory Index\n\nAdd durable global notes under the typed `feedback/`, `user/`, and `reference/` directories, then index them here.\n"
+  },
+  "memory/preferences-from-codex.md": {
+    "sha256": "52863f95a1b1f915d78d6b016d0a58d5de0b966b8a2a9a45515cb82b2c6f442c",
+    "size_bytes": 276,
+    "text": "---\ntype: imported-memory\nsource-agent: codex\nsource-scope: global\nsource-relative-path: .codex/memory/preferences.md\nsource-sha256: ceaebe36847810d8dfb9103d243b39e7f192dd1b44b6d3fd768d18237d358c87\n---\n\n# Preferences\n\nExplain safety-sensitive operations before applying them.\n"
+  },
+  "rules/codex-shared-rules-from-codex.md": {
+    "sha256": "ff4d9a70d901541317eb51a4eaec72fd49dc1c9969ad35a9749bcf72b2313dde",
+    "size_bytes": 57,
+    "text": "# Shared rules\n\nRun focused tests before the full suite.\n"
+  },
+  "sessions/2026-07-29-example-from-codex.md": {
+    "sha256": "a51f63277fad6ba01961d7bf2cc9e6a269283ccea8bfb8d9909e2e3eaff08a4c",
+    "size_bytes": 66,
+    "text": "# Example session\n\nThe migration inventory contract was reviewed.\n"
+  },
+  "skills/review/SKILL.md": {
+    "sha256": "3469eafeb623696924e069b08843119e0c2c98f14e9aa1b97c26ce87afabe771",
+    "size_bytes": 234,
+    "text": "---\nname: review\ndescription: Review a change against its request and current repository rules.\n---\n\nInspect the request, relevant rules, implementation, and verification evidence.\nReport actionable findings before a concise verdict.\n"
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "RULES.md": {
+    "sha256": "c1ff501e106257d956fc72172d90bd75e7b830d3655cba1651f91cabd3a33149",
+    "size_bytes": 121,
+    "text": "# Agent Workflow Rules\n\nThis file is the neutral, global source of truth for workflow rules shared by configured agents.\n"
+  },
+  "manifest.json": {
+    "sha256": "5e6017174a1aef60614dd482445c23bb9d3050db3c7cf0a960e1de3f2d8f5487",
+    "size_bytes": 374,
+    "text": "{\n  \"bootstrap_root\": \"<bootstrap-root>\",\n  \"generated_files\": {\n    \"neutral:RULES.md\": \"c1ff501e106257d956fc72172d90bd75e7b830d3655cba1651f91cabd3a33149\",\n    \"neutral:memory/MEMORY.md\": \"8c4f1fbee8471f84ef41df05b2926582df598ea8e8dc1d5b30a3e4c67a5a3a5a\"\n  },\n  \"generator_version\": \"0.1.0\",\n  \"profile\": null,\n  \"schema_version\": 1,\n  \"scope\": \"global\",\n  \"targets\": []\n}\n"
+  },
+  "memory/MEMORY.md": {
+    "sha256": "8c4f1fbee8471f84ef41df05b2926582df598ea8e8dc1d5b30a3e4c67a5a3a5a",
+    "size_bytes": 138,
+    "text": "# Global Memory Index\n\nAdd durable global notes under the typed `feedback/`, `user/`, and `reference/` directories, then index them here.\n"
+  }
+}

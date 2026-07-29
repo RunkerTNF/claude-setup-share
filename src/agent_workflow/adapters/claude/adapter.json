@@ -52,8 +52,26 @@
         ]
       },
       {
+        "path": ".claude/memory",
+        "kind": "manual_memory",
+        "recursive": true,
+        "include_globs": [
+          "*.md",
+          "**/*.md"
+        ]
+      },
+      {
         "path": ".claude/projects",
         "kind": "auto_memory",
+        "recursive": true,
+        "include_globs": [
+          "*.md",
+          "**/*.md"
+        ]
+      },
+      {
+        "path": ".claude/sessions",
+        "kind": "session",
         "recursive": true,
         "include_globs": [
           "*.md",
@@ -79,6 +97,18 @@
         "include_globs": [
           "**/*"
         ]
+      },
+      {
+        "path": ".claude/statusline.js",
+        "kind": "unknown",
+        "recursive": false,
+        "include_globs": []
+      },
+      {
+        "path": ".claude/workitems-rendering.md",
+        "kind": "unknown",
+        "recursive": false,
+        "include_globs": []
       }
     ]
   },
@@ -123,6 +153,24 @@
       {
         "path": ".claude/commands",
         "kind": "command",
+        "recursive": true,
+        "include_globs": [
+          "*.md",
+          "**/*.md"
+        ]
+      },
+      {
+        "path": ".claude/memory",
+        "kind": "manual_memory",
+        "recursive": true,
+        "include_globs": [
+          "*.md",
+          "**/*.md"
+        ]
+      },
+      {
+        "path": ".claude/sessions",
+        "kind": "session",
         "recursive": true,
         "include_globs": [
           "*.md",
