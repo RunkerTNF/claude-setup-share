@@ -264,6 +264,8 @@ class TransactionPlan:
             raise ValueError("plan roots must have the expected JSON types")
         if not isinstance(payload["operations"], list) or not isinstance(payload["conflicts"], list) or not isinstance(payload["warnings"], list):
             raise ValueError("plan collections must have the expected JSON types")
+        if payload["plan_id"] == _PLAN_ID_SENTINEL:
+            raise ValueError("plan_id uses an internal derivation sentinel")
         try:
             plan = cls(
                 schema_version=payload["schema_version"],

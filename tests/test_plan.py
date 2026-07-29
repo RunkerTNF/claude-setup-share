@@ -166,3 +166,17 @@ def test_direct_plan_constructor_rejects_non_deterministic_plan_id() -> None:
             allowed_roots=("/tmp/project",),
             operations=(),
         )
+
+
+def test_plan_json_rejects_internal_plan_id_sentinel() -> None:
+    plan = TransactionPlan.new(
+        scope_root="/tmp/project/.agents",
+        target_roots={"neutral": "/tmp/project/.agents", "scope": "/tmp/project"},
+        allowed_roots=("/tmp/project",),
+        operations=(),
+    )
+    payload = json.loads(plan.to_json())
+    payload["plan_id"] = "00000000-0000-0000-0000-000000000000"
+
+    with pytest.raises(ValueError, match="plan_id.*internal|plan_id.*match"):
+        TransactionPlan.from_json(json.dumps(payload))
