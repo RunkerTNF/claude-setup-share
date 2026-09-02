@@ -227,13 +227,15 @@ def entrypoint_applies(
 
 
 def source_sha256(context: AdapterContext, adapter_id: str) -> str:
-    definitions = (
-        ("RULES.md", "rules"),
-        ("memory/MEMORY.md", "memory"),
-        (f"overlays/{adapter_id}/RULES.md", "optional"),
-    )
+    """Digest the manager-owned instruction contract an entrypoint renders from.
+
+    User-owned inputs the entrypoint merely points at — the memory index,
+    `rules/`, and agent overlays — stay out of the digest so ordinary edits to
+    them never look like generated-entrypoint drift.
+    """
+    definitions = ("RULES.md",)
     digest = hashlib.sha256()
-    for relative_path, kind in definitions:
+    for relative_path in definitions:
         path = context.neutral_root.joinpath(*relative_path.split("/"))
         if not safe_path_components(path, context.neutral_root):
             raise ValueError(
@@ -245,20 +247,12 @@ def source_sha256(context: AdapterContext, adapter_id: str) -> str:
             )
         if path.is_file():
             content = path.read_bytes()
-        elif kind == "rules":
+        else:
             content = load_bundled_resource(
                 "templates/core/global-rules.md"
                 if context.scope is Scope.GLOBAL
                 else "templates/core/project-rules.md"
             )
-        elif kind == "memory":
-            content = load_bundled_resource(
-                "templates/core/global-memory-index.md"
-                if context.scope is Scope.GLOBAL
-                else "templates/core/project-memory-index.md"
-            )
-        else:
-            content = b"<missing>"
         digest.update(relative_path.encode("utf-8"))
         digest.update(b"\0")
         digest.update(content)

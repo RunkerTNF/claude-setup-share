@@ -3,9 +3,7 @@
   "excluded_skills": [],
   "generated_files": {
     "neutral:RULES.md": "9b140614361ade760014eb87029195c4a2e426109efc07112cecf668f155d590",
-    "neutral:memory/MEMORY.md": "a335e8c5410f5e31d4764f3a634cf365b403b8849a71e441df1116bada8cda6f",
-    "neutral:sessions/.gitkeep": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    "scope:CLAUDE.md": "2de93069ceb7b75d9ebbf1280ecaec7a0e6a90bef378d49fb2a249a8a18ebce2"
+    "scope:CLAUDE.md": "16bf26f7f01beaebe3e0fa7f574ce23bc751583c5661b1f5597fadf21b4d87ba"
   },
   "generator_version": "0.1.0",
   "profile": "shared",

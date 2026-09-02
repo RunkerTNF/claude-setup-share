@@ -12,6 +12,7 @@ import pytest
 from agent_workflow.adapters.base import AdapterContext
 from agent_workflow.adapters.registry import builtin_registry
 from agent_workflow.doctor import run_doctor
+from agent_workflow.layout import seeded_keys
 from agent_workflow.model import ProjectProfile, Scope
 from agent_workflow.plan import DeleteOperation
 from agent_workflow.setup import (
@@ -310,13 +311,46 @@ def test_matching_manifest_allows_deterministic_setup_rerun(
     second = build_setup_plan(request)
 
     assert second.conflicts == ()
+    seeded = {
+        ("neutral", key.split(":", 1)[1])
+        for key in seeded_keys(Scope.GLOBAL)
+    }
     assert {
         (operation.root_id, operation.path)
-        for operation in first.operations
+        for operation in second.operations
     } == {
         (operation.root_id, operation.path)
-        for operation in second.operations
-    }
+        for operation in first.operations
+    } - seeded
+
+
+def test_edited_memory_index_neither_conflicts_nor_enters_the_manifest(
+    tmp_path: Path,
+) -> None:
+    request = _global_request(tmp_path, targets=("codex",))
+    apply_plan(build_setup_plan(request))
+    index = request.home / ".agents" / "memory" / "MEMORY.md"
+    index.write_text("- [note](note.md) - hook\n", encoding="utf-8")
+
+    plan = build_setup_plan(request)
+
+    assert plan.conflicts == ()
+    assert not any(
+        operation.path.replace("\\", "/") == "memory/MEMORY.md"
+        for operation in plan.operations
+    )
+    manifest_write = next(
+        operation
+        for operation in plan.operations
+        if operation.path == "manifest.json"
+    )
+    manifest = json.loads(manifest_write.content_bytes())
+    assert "neutral:memory/MEMORY.md" not in manifest["generated_files"]
+
+    apply_plan(plan)
+
+    assert index.read_text(encoding="utf-8") == "- [note](note.md) - hook\n"
+    assert run_doctor(request.home / ".agents") == ()
 
 
 def test_project_setup_requires_verified_global_manager(

@@ -163,8 +163,15 @@ def _canonical_generated_keys(manifest: WorkflowManifest) -> bool:
 
 
 def _check_generated(root: Path, manifest: WorkflowManifest, diagnostics: list[Diagnostic]) -> None:
+    from .layout import seeded_keys
+
     target_roots = {"neutral": root, "scope": root.parent}
+    seeded = seeded_keys(manifest.scope)
     for key, expected_digest in sorted(manifest.generated_files.items(), key=lambda item: item[0].casefold()):
+        if key in seeded:
+            # Manifests written before seeded ownership still list these
+            # user-owned files; editing them is expected, not drift.
+            continue
         root_id, relative_path = key.split(":", 1)
         target_root = target_roots[root_id]
         target = target_root.joinpath(*relative_path.split("/"))

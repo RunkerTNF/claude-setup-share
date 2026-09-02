@@ -3,7 +3,6 @@
   "excluded_skills": [],
   "generated_files": {
     "neutral:RULES.md": "3b138a7bdfb9ad9d0a0108de652ad2f4ddc1614d6032bb45b40ec33454f6e1bb",
-    "neutral:memory/MEMORY.md": "358215c449c2995a7c6295ecbbca2c3e709167bbff4c0e2d02f03186ccfe538e",
     "neutral:skills/agent-workflow-migrate/SKILL.md": "cf4c682fae801f1b9a2b0a9897d57350d1ea789df66f32a6055aef0028ed0553",
     "neutral:skills/agent-workflow-migrate/references/classification-contract.md": "9ed613e73d18e27c5a1c6d79bd3478233585dec2ccd9955bad2f5deb16d99f80",
     "neutral:skills/agent-workflow-migrate/references/recovery.md": "502cc51cbde02729b18f27e1195b4d7fad16ec6ff35b63ba9942864d283cec0b",
@@ -30,8 +29,8 @@
     "neutral:skills/tasks/SKILL.md": "959f07de9f4a1d6926930dcfddbf52eeb5caa142b090abcf16df836c8e4eace4",
     "neutral:skills/tasks/references/workitems-rendering.md": "c991c41f18ad038721ebf22c4f031ed74a61468d7681c68d953d15083d86a0f1",
     "neutral:skills/wrap/SKILL.md": "9a9998dd1be7bee3244054e786af5f5d6f06d38015bbad8e0aaf037cfa85b9e7",
-    "neutral:workflow/agent-workflow.pyz": "97c4f6c0d770ef2d98b7c7045711493e68ec087284a7a71dbabfd296f0829065",
-    "scope:.codex/AGENTS.md": "855fcbf8a480b15ca08a7e07c1dc33cc4fdd5231d9aaf9453341f59d0156a0d7"
+    "neutral:workflow/agent-workflow.pyz": "480fae76f497db078f68ab2c68eae6297752918a3164191610bed6566705881b",
+    "scope:.codex/AGENTS.md": "0d21ee513b3d6c38abd5018b02cfb180f9504aa019fd6ee265a9b03d13a14da7"
   },
   "generator_version": "0.1.0",
   "profile": null,

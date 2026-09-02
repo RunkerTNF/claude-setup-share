@@ -154,9 +154,10 @@ copied byte-for-byte only when the whole directory is portable.
 Manual memory is durable user-authored knowledge and migrates to
 `.agents/memory/` with source agent, scope, relative label, and source hash.
 The manager writes the deterministic `.agents/memory/IMPORTED.md` provenance
-index, and the canonical memory index points agents to it. Imported common
-rules remain separate under `.agents/rules/`; canonical `RULES.md` requires
-agents to load those files in stable order.
+index, and the seeded `.agents/memory/MEMORY.md` points agents to it. That index
+stays user-owned: fold imported notes into it by hand whenever you want one list
+instead of two. Imported common rules remain separate under `.agents/rules/`;
+canonical `RULES.md` requires agents to load those files in stable order.
 Native automatic memory is not equivalent. It stays excluded by default; with
 `--include-native-cache`, selected entries go only to
 `.agents/cache/AGENT/memory/` and never become authoritative manual memory.

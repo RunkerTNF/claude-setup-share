@@ -42,6 +42,7 @@ class Severity(StrEnum):
 class Ownership(StrEnum):
     CANONICAL = "canonical"
     GENERATED = "generated"
+    SEEDED = "seeded"
     UNMANAGED = "unmanaged"
 
 
