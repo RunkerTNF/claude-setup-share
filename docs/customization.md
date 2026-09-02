@@ -28,6 +28,10 @@ Global memory хранится в `~/.agents/memory/`, project memory — в
 `MEMORY.md` одновременно. Task progress и handoff относятся к
 `.agents/sessions/`, а не к memory.
 
+`MEMORY.md` — seeded file: manager создаёт его при установке, если файла нет, и
+после этого не отслеживает и не перезаписывает. Ручное ведение индекса не даёт
+drift, но и обновления bundled-шаблона в существующий файл не приходят.
+
 Imported legacy notes перечислены в `memory/IMPORTED.md`; provenance не надо
 удалять при редактировании содержимого.
 

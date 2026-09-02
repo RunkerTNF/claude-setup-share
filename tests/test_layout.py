@@ -34,6 +34,16 @@ def make_paths(tmp_path: Path, *, project: bool = True) -> HostPaths:
     return HostPaths.discover(home=home, cwd=repo)
 
 
+def _install_project_scope(paths: HostPaths) -> Path:
+    plan = plan_neutral_init(paths, Scope.PROJECT, ProjectProfile.LOCAL, ())
+    root = paths.project_root / ".agents"
+    for operation in plan.operations:
+        target = root / operation.path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(operation.content_bytes())
+    return root
+
+
 def test_global_plan_contains_neutral_core_only(tmp_path: Path) -> None:
     paths = make_paths(tmp_path)
 
@@ -48,10 +58,19 @@ def test_global_plan_contains_neutral_core_only(tmp_path: Path) -> None:
         "RULES.md",
         "manifest.json",
         "memory/MEMORY.md",
+        "overlays/.gitkeep",
+        "rules/.gitkeep",
     }
     assert {operation.ownership for operation in plan.operations} == {
         Ownership.CANONICAL,
         Ownership.GENERATED,
+        Ownership.SEEDED,
+    }
+    manifest_write = next(
+        operation for operation in plan.operations if operation.path == "manifest.json"
+    )
+    assert set(json.loads(manifest_write.content_bytes())["generated_files"]) == {
+        "neutral:RULES.md",
     }
     assert plan.allowed_roots == (str(paths.home),)
     assert dict(plan.target_roots) == {
@@ -75,16 +94,12 @@ def test_project_plan_includes_sessions_and_profile(tmp_path: Path) -> None:
         operation
         for operation in plan.operations
         if operation.path == "sessions/.gitkeep"
-    ).ownership is Ownership.GENERATED
+    ).ownership is Ownership.SEEDED
     manifest_write = next(op for op in plan.operations if op.path == "manifest.json")
     manifest = json.loads(manifest_write.content_bytes())
     assert manifest["profile"] == "split"
     assert manifest["targets"] == ["codex"]
-    assert set(manifest["generated_files"]) == {
-        "neutral:RULES.md",
-        "neutral:memory/MEMORY.md",
-        "neutral:sessions/.gitkeep",
-    }
+    assert set(manifest["generated_files"]) == {"neutral:RULES.md"}
 
 
 def test_planning_is_deterministic_and_does_not_create_files(tmp_path: Path) -> None:
@@ -143,7 +158,7 @@ def test_existing_empty_unmanaged_rules_file_is_safe_to_initialize(tmp_path: Pat
     assert rules_write.expected_sha256 == "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
 
 
-def test_existing_unmanaged_nonempty_session_marker_becomes_a_conflict(tmp_path: Path) -> None:
+def test_existing_seeded_session_marker_is_left_alone(tmp_path: Path) -> None:
     paths = make_paths(tmp_path)
     marker = paths.project_root / ".agents" / "sessions" / ".gitkeep"
     marker.parent.mkdir(parents=True)
@@ -152,9 +167,8 @@ def test_existing_unmanaged_nonempty_session_marker_becomes_a_conflict(tmp_path:
     plan = plan_neutral_init(paths, Scope.PROJECT, ProjectProfile.LOCAL, ())
 
     assert "sessions/.gitkeep" not in operation_paths(plan)
-    assert plan.conflicts == (
-        "unmanaged non-empty output: neutral:sessions/.gitkeep",
-    )
+    assert plan.conflicts == ()
+    assert marker.read_text(encoding="utf-8") == "personal session\n"
 
 
 def test_modified_managed_file_becomes_a_conflict(tmp_path: Path) -> None:
@@ -174,21 +188,38 @@ def test_modified_managed_file_becomes_a_conflict(tmp_path: Path) -> None:
     assert "manifest.json" not in operation_paths(plan)
 
 
-def test_modified_managed_nonempty_session_marker_becomes_a_conflict(tmp_path: Path) -> None:
+def test_edited_memory_index_stays_user_owned_after_install(tmp_path: Path) -> None:
     paths = make_paths(tmp_path)
-    initial = plan_neutral_init(paths, Scope.PROJECT, ProjectProfile.LOCAL, ())
-    root = paths.project_root / ".agents"
-    for operation in initial.operations:
-        target = root / operation.path
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(operation.content_bytes())
-    (root / "sessions" / ".gitkeep").write_text("personal session\n", encoding="utf-8")
+    root = _install_project_scope(paths)
+    index = root / "memory" / "MEMORY.md"
+    index.write_text("- [note](note.md) - hook\n", encoding="utf-8")
 
     plan = plan_neutral_init(paths, Scope.PROJECT, ProjectProfile.LOCAL, ())
 
-    assert "sessions/.gitkeep" not in operation_paths(plan)
-    assert plan.conflicts == (
-        "managed output modified: neutral:sessions/.gitkeep",
+    assert "memory/MEMORY.md" not in operation_paths(plan)
+    assert plan.conflicts == ()
+    assert index.read_text(encoding="utf-8") == "- [note](note.md) - hook\n"
+    manifest_write = next(op for op in plan.operations if op.path == "manifest.json")
+    assert "neutral:memory/MEMORY.md" not in json.loads(
+        manifest_write.content_bytes()
+    )["generated_files"]
+
+
+def test_missing_seeded_memory_index_is_recreated(tmp_path: Path) -> None:
+    paths = make_paths(tmp_path)
+    root = _install_project_scope(paths)
+    (root / "memory" / "MEMORY.md").unlink()
+
+    plan = plan_neutral_init(paths, Scope.PROJECT, ProjectProfile.LOCAL, ())
+
+    recreated = next(
+        operation
+        for operation in plan.operations
+        if operation.path == "memory/MEMORY.md"
+    )
+    assert recreated.expected_sha256 is None
+    assert recreated.content_bytes() == load_bundled_resource(
+        "templates/core/project-memory-index.md"
     )
 
 

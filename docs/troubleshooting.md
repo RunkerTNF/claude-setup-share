@@ -58,6 +58,11 @@ Project setup запущен до валидной global-установки и�
 
 Не меняйте hash в manifest.
 
+Индекс памяти сюда не относится: `memory/MEMORY.md` — seeded file, его правка
+не даёт ни conflict, ни `generated.drift`. Если старый doctor всё же сообщает
+drift на этом пути, установка сделана версией до seeded ownership — повторный
+`setup apply` перепишет manifest.
+
 ## Doctor сообщает stale/missing file
 
 Запустите doctor с правильным scope:

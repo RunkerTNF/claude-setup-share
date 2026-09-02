@@ -261,6 +261,7 @@ def build_setup_plan(request: SetupRequest) -> TransactionPlan:
             for key, operation in sorted(operations.items())
             if key not in _PROFILE_FILES
             and isinstance(operation, WriteOperation)
+            and operation.ownership is not Ownership.SEEDED
         }
         final_manifest = WorkflowManifest(
             schema_version=1,

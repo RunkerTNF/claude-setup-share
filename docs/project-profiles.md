@@ -7,7 +7,7 @@ Profile определяет, какие project workflow files предназн
 | Project artifact | `local` | `shared` | `split` | Ownership |
 |---|---|---|---|---|
 | `.agents/RULES.md`, `.agents/rules/` | ignored | tracked | tracked | canonical/user-authored |
-| `.agents/memory/` | ignored | tracked | ignored | canonical/user-authored |
+| `.agents/memory/` | ignored | tracked | ignored | seeded index/user-authored |
 | `.agents/sessions/` | ignored | tracked | ignored | user-authored |
 | `.agents/skills/` | ignored | tracked | tracked | canonical/user-authored |
 | `.agents/overlays/` | ignored | tracked | ignored | agent-specific |

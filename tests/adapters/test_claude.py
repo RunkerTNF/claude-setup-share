@@ -119,3 +119,33 @@ def test_claude_validation_detects_missing_and_drifted_entrypoint(
     assert [(item.code, item.path) for item in adapter.validate(adapter_context)] == [
         ("adapter.entrypoint-drift", "claude:.claude/CLAUDE.md")
     ]
+
+
+def test_user_owned_inputs_do_not_drift_the_entrypoint(tmp_path: Path) -> None:
+    adapter = ClaudeAdapter()
+    adapter_context = make_context(tmp_path, Scope.GLOBAL)
+    neutral = adapter_context.neutral_root
+    overlay = neutral / "overlays" / "claude" / "RULES.md"
+    overlay.parent.mkdir(parents=True)
+    overlay.write_text("Claude overlay\n", encoding="utf-8")
+    operation = adapter.plan_entrypoints(adapter_context)[0]
+    target = adapter_context.home / operation.path
+    target.parent.mkdir()
+    target.write_bytes(operation.content_bytes())
+
+    neutral.joinpath("memory/MEMORY.md").write_text(
+        "- [note](note.md) - hook\n", encoding="utf-8"
+    )
+    neutral.joinpath("rules").mkdir()
+    neutral.joinpath("rules/10-extra.md").write_text(
+        "extra rules\n", encoding="utf-8"
+    )
+    overlay.write_text("edited overlay\n", encoding="utf-8")
+
+    assert adapter.validate(adapter_context) == ()
+
+    neutral.joinpath("RULES.md").write_text("edited rules\n", encoding="utf-8")
+
+    assert [
+        (item.code, item.path) for item in adapter.validate(adapter_context)
+    ] == [("adapter.entrypoint-drift", "claude:.claude/CLAUDE.md")]

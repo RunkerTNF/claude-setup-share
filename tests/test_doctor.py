@@ -70,6 +70,32 @@ def test_doctor_reports_missing_and_drifted_canonical_generated_files(tmp_path: 
     assert {item.code for item in diagnostics} >= {"generated.drift", "generated.missing"}
 
 
+def test_doctor_ignores_seeded_paths_listed_by_an_older_manifest(tmp_path: Path) -> None:
+    root = tmp_path / ".agents"
+    write_manifest(
+        root,
+        generated_files={"neutral:memory/MEMORY.md": "c" * 64},
+    )
+    write_core(root)
+    (root / "memory" / "MEMORY.md").write_text(
+        "- [note](note.md) - hook\n", encoding="utf-8"
+    )
+
+    assert run_doctor(root) == ()
+
+
+def test_doctor_still_reports_a_deleted_memory_index(tmp_path: Path) -> None:
+    root = tmp_path / ".agents"
+    write_manifest(
+        root,
+        generated_files={"neutral:memory/MEMORY.md": "c" * 64},
+    )
+    write_core(root)
+    (root / "memory" / "MEMORY.md").unlink()
+
+    assert {item.code for item in run_doctor(root)} == {"core.missing"}
+
+
 def test_doctor_returns_diagnostic_for_invalid_manifest_without_raising(tmp_path: Path) -> None:
     root = tmp_path / ".agents"
     root.mkdir()

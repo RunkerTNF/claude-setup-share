@@ -62,16 +62,26 @@ canonical только потому, что похожее поле есть у 
 
 ## Владение файлами
 
-План различает три практических класса:
+План различает четыре практических класса:
 
 - canonical — переносимый workflow content;
 - generated — manager, manifest, native entrypoints и managed ignore blocks;
+- seeded — `memory/MEMORY.md` и маркеры пустых каталогов: manager создаёт файл
+  один раз, если его нет, и дальше им не владеет;
 - user-authored — дополнительные rules, memory, sessions и custom skills, не
   перечисленные в manifest.
 
 `manifest.json` хранит targets, profile, excluded skills и hashes управляемых
 файлов. Manager не перезаписывает unmanaged path и не принимает drift
 управляемого файла без явного разрешения конфликта.
+
+Seeded-файлы в `generated_files` не попадают: их положено редактировать вручную,
+поэтому правка индекса памяти не даёт ни `generated.drift` в doctor, ни conflict
+в setup. Обратная сторона — обновлённый bundled-шаблон seeded-файла не доезжает
+до существующей установки, а его удаление ловит только проверка обязательного
+core (`memory/MEMORY.md`). Manifest, записанный более старой версией, всё ещё
+может перечислять seeded-путь; doctor такие записи игнорирует, а следующий
+`setup apply` убирает их из manifest.
 
 ## Setup data flow
 

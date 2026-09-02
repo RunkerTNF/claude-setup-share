@@ -15,13 +15,32 @@ from .resources import bundled_resource_source, load_bundled_resource
 
 _GLOBAL_FILES = (
     ("RULES.md", "templates/core/global-rules.md", Ownership.CANONICAL),
-    ("memory/MEMORY.md", "templates/core/global-memory-index.md", Ownership.CANONICAL),
+    ("memory/MEMORY.md", "templates/core/global-memory-index.md", Ownership.SEEDED),
+    ("rules/.gitkeep", None, Ownership.SEEDED),
+    ("overlays/.gitkeep", None, Ownership.SEEDED),
 )
 _PROJECT_FILES = (
     ("RULES.md", "templates/core/project-rules.md", Ownership.CANONICAL),
-    ("memory/MEMORY.md", "templates/core/project-memory-index.md", Ownership.CANONICAL),
-    ("sessions/.gitkeep", None, Ownership.GENERATED),
+    ("memory/MEMORY.md", "templates/core/project-memory-index.md", Ownership.SEEDED),
+    ("rules/.gitkeep", None, Ownership.SEEDED),
+    ("overlays/.gitkeep", None, Ownership.SEEDED),
+    ("sessions/.gitkeep", None, Ownership.SEEDED),
 )
+
+
+def seeded_keys(scope: Scope) -> frozenset[str]:
+    """Return manifest keys for files the manager seeds once and then releases.
+
+    A seeded file is written only when it is missing. Afterwards it belongs to
+    the user, so it never enters ``generated_files`` and manifests written by
+    older versions that still list it are ignored rather than reported as drift.
+    """
+    definitions = _GLOBAL_FILES if scope is Scope.GLOBAL else _PROJECT_FILES
+    return frozenset(
+        f"neutral:{path}"
+        for path, _, ownership in definitions
+        if ownership is Ownership.SEEDED
+    )
 
 
 def plan_neutral_init(
@@ -53,6 +72,18 @@ def plan_neutral_init(
         target = resolve_write_target("neutral", path, target_roots, (scope_base,))
         snapshot = _file_snapshot(target)
         key = f"neutral:{path}"
+        if ownership is Ownership.SEEDED:
+            if snapshot.sha256 is None:
+                operations.append(
+                    WriteOperation.from_bytes(
+                        root_id="neutral",
+                        path=path,
+                        content=content,
+                        expected_sha256=None,
+                        ownership=ownership,
+                    )
+                )
+            continue
         if not _can_write(existing_manifest, key, snapshot):
             kind = (
                 "managed output modified"
@@ -90,7 +121,8 @@ def plan_neutral_init(
             targets=normalized_targets,
             generated_files={
                 f"neutral:{path}": sha256_bytes(content)
-                for path, content, _ in desired
+                for path, content, ownership in desired
+                if ownership is not Ownership.SEEDED
             },
             bootstrap_root=str(bootstrap_root) if bootstrap_root is not None else None,
         )
